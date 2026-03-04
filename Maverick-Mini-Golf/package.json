@@ -1,0 +1,14 @@
+{
+  "name": "maverick-mini-golf",
+  "version": "1.0.0",
+  "description": "16-bit mini golf game set at UNO's Elmwood Park Golf Course",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
