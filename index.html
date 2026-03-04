@@ -1,396 +1,983 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🏎️ Top-Down Drifting Simulator</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      background: #1a1a1a;
-      font-family: 'Courier New', monospace;
-      color: #fff;
-    }
-    
-    canvas {
-      display: block;
-      background: #000;
-      border: 3px solid #fff;
-      image-rendering: pixelated;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elmwood Drift — UNO Campus</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
 </head>
 <body>
-  <canvas id="gameCanvas"></canvas>
+<canvas id="game"></canvas>
+<script>
+'use strict';
 
-  <script>
-    // ============================================================
-    // [CONFIG] — All tunable physics constants
-    // ============================================================
-    const CONFIG = {
-      // Engine
-      torque:           0.4,     // Acceleration force
-      brakeForce:       0.6,     // Braking deceleration
-      maxSpeed:         8.0,     // Max velocity magnitude (px/frame)
-      reverseMaxSpeed:  3.0,
+// ============================================================
+// [CONFIG]
+// ============================================================
+const CONFIG = {
+  // Engine
+  torque:           0.26,
+  brakeForce:       0.55,
+  maxSpeed:         5.5,
+  reverseMaxSpeed:  2.0,
 
-      // Steering
-      steerSpeed:       0.045,   // Radians per frame at full lock
-      steerReturn:      0.85,    // How fast steering centers (0–1)
+  // Steering (front wheel angle)
+  // Steady-state steerAngle while holding = steerSpeed / (1 - steerReturn)
+  // 0.062 / (1 - 0.88) = 0.062 / 0.12 = 0.52 rad → clamped to maxSteer (0.44) = full lock ✓
+  maxSteer:         0.44,   // max front wheel lock (radians ~25°)
+  steerSpeed:       0.062,  // how fast steering angle builds
+  steerReturn:      0.88,   // high value so key-hold reaches full lock naturally
 
-      // Grip & Drift
-      gripFront:        0.88,    // Front lateral grip (0 = ice, 1 = glue)
-      gripRear:         0.82,    // Rear lateral grip
-      handbrakeGrip:    0.30,    // Rear grip when handbrake is held
-      driftThreshold:   0.35,    // Slip angle (rad) that triggers drift state
-      tractionRegain:   0.04,    // How fast grip returns after drift
+  // Yaw (rotational physics)
+  // targetYaw at full lock + full speed: 0.44 * 1.0 * 0.072 = 0.0317 rad/frame ≈ 110°/sec
+  steerYawFactor:   0.072,
+  yawLerp:          0.26,
+  oversteerFactor:  0.024,  // rear slip → extra yaw/frame — faster spinout buildup
 
-      // Off-track penalty
-      offTrackFriction: 0.92,    // Velocity multiplier per frame off-track
-      onTrackFriction:  0.995,   // Velocity multiplier per frame on-track
+  // Grip — NOTE: in this physics model, HIGHER grip = more steady-state slip.
+  // lat *= grip each frame preserves lateral velocity; velocity then lags behind heading → slip.
+  // grip=0: velocity instantly aligns with heading (no slip).
+  // grip=0.86: steady-state slip at full lock+speed = 0.0317/0.14 ≈ 0.23 rad (comfortable oversteer).
+  // grip=0.95: handbrake entry = 0.0317/0.05 ≈ 0.63 rad slip (aggressive slide).
+  gripRear:         0.86,   // rear steps out more readily at speed
+  gripDrift:        0.93,   // once drifting, slide deepens and sustains more
+  handbrakeGrip:    0.95,   // handbrake = very aggressive slide entry
+  driftThreshold:   0.16,   // lower threshold — drift state triggers sooner
 
-      // Scoring
-      scorePerFrame:    0.5,     // Base points per frame while drifting
-      angleMultiplier:  80,      // Slip angle contribution to score
-      comboWindow:      90,      // Frames before combo resets after drift ends
-      maxCombo:         8,       // Combo cap
-    };
+  // Surface friction
+  offTrackFriction: 0.90,
+  onTrackFriction:  0.992,
 
-    // ============================================================
-    // [STATE] — Global game state
-    // ============================================================
-    const state = {
-      frameCount: 0,
-      score: 0,
-      combo: 0,
-      comboTimer: 0,
-      driftStarted: false,
-      driftFrame: 0,
-    };
+  // Scoring
+  scorePerFrame:    0.5,
+  angleMultiplier:  80,
+  comboWindow:      90,
+  maxCombo:         8,
+};
 
-    // ============================================================
-    // [MAP] — Track geometry & rendering data
-    // ============================================================
-    const MAP = {
-      width:  1400,          // Canvas width
-      height: 900,           // Canvas height
-      background: '#2d4a1e', // Grass color
-      trackColor: '#4a4a4a', // Asphalt color
-      lineColor:  '#ffffff', // Track markings
+const TILE_SIZE = 64;
 
-      // Phase 1: No boundaries (blank canvas)
-      outerBoundary: [],
-      innerBoundary: [],
-      zones: [],
-      
-      // Spawn point
-      spawn: { x: 700, y: 450, angle: 0 },
-      stops: [],
-    };
+// ============================================================
+// [STATE]
+// ============================================================
+const STATE = {
+  score:       0,
+  combo:       1,
+  comboTimer:  0,
+  drifting:    false,
+  slipAngle:   0,
+  wasDrifting: false,
+  frame:       0,
+};
 
-    // ============================================================
-    // [CAR] — Car object and physics
-    // ============================================================
-    const car = {
-      x: MAP.spawn.x,
-      y: MAP.spawn.y,
-      heading: MAP.spawn.angle,  // Direction car is pointing (radians)
-      vx: 0,                     // Velocity X
-      vy: 0,                     // Velocity Y
-      speed: 0,                  // Magnitude of velocity
-      steer: 0,                  // Current steering angle (-1 to 1)
-      drifting: false,
-      driftTractionLoss: 0,      // How much traction is lost (0-1)
-      wheelmarkPositions: [],    // Trail of tire marks
+// ============================================================
+// [MAP]
+// ============================================================
 
-      width: 12 * 3,    // 12px wide, scaled 3x = 36px
-      height: 20 * 3,   // 20px tall, scaled 3x = 60px
+// Tile IDs
+const T = {
+  VOID:         0,
+  ASPHALT:      1,
+  INTERSECTION: 2,
+  SIDEWALK:     3,
+  GRASS:        4,
+  DIRT:         5,
+  PARKING:      6,
+  BUILDING:     7,
+  TREE:         8,
+  CURB:         10,
+};
 
-      update() {
-        // 1. Read input (handled in input section)
-        
-        // 2. Apply torque to speed along heading
-        if (input.accelerate) {
-          this.speed += CONFIG.torque;
-        }
-        if (input.brake) {
-          this.speed -= CONFIG.brakeForce;
-        }
-        
-        // Cap speed
-        const maxSpd = this.speed > 0 ? CONFIG.maxSpeed : CONFIG.reverseMaxSpeed;
-        this.speed = Math.max(-maxSpd, Math.min(maxSpd, this.speed));
+const TILE_COLLIDABLE = {
+  0: true, 1: false, 2: false, 3: false, 4: false,
+  5: false, 6: false, 7: true, 8: true, 10: true,
+};
 
-        // 3. Rotate heading by steer input (scaled by speed)
-        const steerAmount = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-        const steerDelta = steerAmount * CONFIG.steerSpeed * Math.abs(this.speed) / CONFIG.maxSpeed;
-        this.steer += steerDelta;
-        this.steer *= CONFIG.steerReturn;
-        this.heading += this.steer;
+const TILE_FRICTION = {
+  0: 0.85, 1: 0.995, 2: 0.995, 3: 0.97, 4: 0.94,
+  5: 0.96, 6: 0.99, 7: 0.85, 8: 0.85, 10: 0.85,
+};
 
-        // 4. Calculate forward and lateral components
-        const speed = this.speed;
-        
-        // Forward velocity (along heading)
-        const forwardVx = Math.cos(this.heading) * speed;
-        const forwardVy = Math.sin(this.heading) * speed;
-        
-        // Current velocity magnitude
-        const velMag = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-        
-        // Lateral component (perpendicular to heading)
-        const lateralAxis = this.heading + Math.PI / 2;
-        let lateralMag = 0;
-        if (velMag > 0.1) {
-          const velAngle = Math.atan2(this.vy, this.vx);
-          lateralMag = Math.cos(velAngle - (this.heading + Math.PI / 2));
-          lateralMag *= velMag;
-        }
+let MAP = null; // set by buildPlaceholderMap()
 
-        // 5. Apply grip to lateral component
-        let grip = CONFIG.gripRear;
-        if (input.handbrake) {
-          grip = CONFIG.handbrakeGrip;
-        }
-        
-        lateralMag *= grip;
+function buildPlaceholderMap() {
+  const W = 90, H = 70;
+  const tiles     = new Array(W * H).fill(T.GRASS);
+  const collision = new Array(W * H).fill(false);
+  const markings  = new Array(W * H).fill(false);
 
-        // Regain traction after drift
-        this.driftTractionLoss = Math.max(0, this.driftTractionLoss - CONFIG.tractionRegain);
+  function idx(x, y) { return y * W + x; }
 
-        // 6. Reconstruct velocity
-        const lateralVx = Math.cos(lateralAxis) * lateralMag;
-        const lateralVy = Math.sin(lateralAxis) * lateralMag;
-        
-        this.vx = forwardVx + lateralVx;
-        this.vy = forwardVy + lateralVy;
-
-        // 7. Apply on/off-track friction
-        const friction = CONFIG.onTrackFriction;
-        this.vx *= friction;
-        this.vy *= friction;
-
-        // 8. Integrate position
-        this.x += this.vx;
-        this.y += this.vy;
-
-        // Wrap at canvas edges
-        if (this.x < 0) this.x += MAP.width;
-        if (this.x > MAP.width) this.x -= MAP.width;
-        if (this.y < 0) this.y += MAP.height;
-        if (this.y > MAP.height) this.y -= MAP.height;
-
-        // 9. Calculate slip angle
-        const velAngle = Math.atan2(this.vy, this.vx);
-        let slipAngle = Math.abs(velAngle - this.heading);
-        
-        // Normalize slip angle to 0 - PI
-        while (slipAngle > Math.PI) slipAngle -= Math.PI;
-        
-        // 10. Detect drift
-        const wasDrifting = this.drifting;
-        this.drifting = slipAngle > CONFIG.driftThreshold && this.speed > 2;
-        
-        if (this.drifting) {
-          this.driftTractionLoss = Math.min(1, this.driftTractionLoss + 0.1);
-          state.driftFrame++;
-        } else {
-          if (wasDrifting) {
-            state.comboTimer = CONFIG.comboWindow;
-            state.combo = Math.min(state.combo + 1, CONFIG.maxCombo);
-          }
-          state.driftFrame = 0;
-        }
-
-        if (state.comboTimer > 0) {
-          state.comboTimer--;
-        } else {
-          state.combo = 0;
+  function fillRect(x, y, w, h, tileId) {
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        const tx = x + dx, ty = y + dy;
+        if (tx >= 0 && tx < W && ty >= 0 && ty < H) {
+          tiles[idx(tx, ty)] = tileId;
         }
       }
-    };
+    }
+  }
 
-    // ============================================================
-    // [INPUT] — Keyboard handler
-    // ============================================================
-    const input = {
-      accelerate: false,
-      brake: false,
-      left: false,
-      right: false,
-      handbrake: false,
-    };
-
-    window.addEventListener('keydown', (e) => {
-      const key = e.key.toLowerCase();
-      if (key === 'w') input.accelerate = true;
-      if (key === 's') input.brake = true;
-      if (key === 'a') input.left = true;
-      if (key === 'd') input.right = true;
-      if (key === ' ') { input.handbrake = true; e.preventDefault(); }
-    });
-
-    window.addEventListener('keyup', (e) => {
-      const key = e.key.toLowerCase();
-      if (key === 'w') input.accelerate = false;
-      if (key === 's') input.brake = false;
-      if (key === 'a') input.left = false;
-      if (key === 'd') input.right = false;
-      if (key === ' ') { input.handbrake = false; e.preventDefault(); }
-    });
-
-    // ============================================================
-    // [SCORING] — Drift detection & scoring
-    // ============================================================
-    function updateScoring() {
-      if (car.drifting) {
-        const velAngle = Math.atan2(car.vy, car.vx);
-        let slipAngle = Math.abs(velAngle - car.heading);
-        while (slipAngle > Math.PI) slipAngle -= Math.PI;
-        
-        const scoreInc = CONFIG.scorePerFrame + slipAngle * CONFIG.angleMultiplier;
-        state.score += scoreInc * (1 + state.combo * 0.1);
+  function drawHRoad(x, y, len, roadWidth) {
+    // Sidewalk border
+    fillRect(x, y - 1, len, 1, T.SIDEWALK);
+    fillRect(x, y + roadWidth, len, 1, T.SIDEWALK);
+    // Road surface
+    fillRect(x, y, len, roadWidth, T.ASPHALT);
+    // Center marking on wide roads
+    if (roadWidth >= 3) {
+      const cy = y + Math.floor(roadWidth / 2);
+      for (let mx = x; mx < x + len; mx++) {
+        markings[idx(mx, cy)] = true;
       }
     }
+  }
 
-    // ============================================================
-    // [RENDERER] — Canvas drawing
-    // ============================================================
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d', { alpha: false });
-    
-    canvas.width = MAP.width;
-    canvas.height = MAP.height;
+  function drawVRoad(x, y, len, roadWidth) {
+    fillRect(x - 1, y, 1, len, T.SIDEWALK);
+    fillRect(x + roadWidth, y, 1, len, T.SIDEWALK);
+    fillRect(x, y, roadWidth, len, T.ASPHALT);
+  }
 
-    function drawCarSprite(x, y, heading, isCrashing) {
-      // Save context
-      ctx.save();
-      
-      // Translate to car position and rotate
-      ctx.translate(x, y);
-      ctx.rotate(heading);
-      
-      // Draw pixelated car (12x20 base, scaled 3x = 36x60)
-      const scale = 3;
-      const w = 12 * scale;
-      const h = 20 * scale;
-      
-      // Choose color based on drift state
-      let bodyColor = '#ff4444';
-      let wheelColor = '#333333';
-      
-      if (car.drifting) {
-        // Flash when drifting
-        bodyColor = Math.floor(state.frameCount / 3) % 2 === 0 ? '#ffff00' : '#ff4444';
+  function drawSegment(x1, y1, x2, y2, tileId, width) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len === 0) return;
+    const steps = Math.ceil(len * 2);
+    const half = Math.floor(width / 2);
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const cx = Math.round(x1 + dx * t);
+      const cy = Math.round(y1 + dy * t);
+      const px = -dy / len, py = dx / len;
+      for (let w = -half; w <= half; w++) {
+        const tx = Math.round(cx + px * w);
+        const ty = Math.round(cy + py * w);
+        if (tx >= 0 && tx < W && ty >= 0 && ty < H) {
+          tiles[idx(tx, ty)] = tileId;
+        }
       }
-      
-      // Main body (rectangle)
-      ctx.fillStyle = bodyColor;
-      ctx.fillRect(-w / 2, -h / 2, w, h * 0.6);
-      
-      // Hood (triangle pointing up)
-      ctx.fillStyle = '#cc3333';
-      ctx.beginPath();
-      ctx.moveTo(-w / 2, -h / 2);
-      ctx.lineTo(w / 2, -h / 2);
-      ctx.lineTo(0, -h / 2 - h * 0.15);
-      ctx.fill();
-      
-      // Rear bumper
-      ctx.fillStyle = '#990000';
-      ctx.fillRect(-w / 2, h / 2 - h * 0.1, w, h * 0.1);
-      
-      // Windows
-      ctx.fillStyle = '#4499ff';
-      ctx.fillRect(-w / 3, -h / 6, w * 0.66, h * 0.2);
-      
-      // Wheels
-      ctx.fillStyle = wheelColor;
-      ctx.fillRect(-w / 3, -h / 2 - h * 0.05, w * 0.22, h * 0.05);
-      ctx.fillRect(w / 3 - w * 0.22, -h / 2 - h * 0.05, w * 0.22, h * 0.05);
-      ctx.fillRect(-w / 3, h / 2, w * 0.22, h * 0.05);
-      ctx.fillRect(w / 3 - w * 0.22, h / 2, w * 0.22, h * 0.05);
-      
-      ctx.restore();
     }
+  }
 
-    function render() {
-      // Clear canvas
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fillRect(0, 0, MAP.width, MAP.height);
-      
-      // Draw grid background (optional, for visual reference)
-      ctx.strokeStyle = '#333333';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < MAP.width; x += 100) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, MAP.height);
-        ctx.stroke();
+  // ── Background: grass everywhere ──────────────────────────────
+  // (already filled with GRASS)
+
+  // ── Dodge Street: east-west, rows 3–5 (3 tiles wide) ─────────
+  drawHRoad(0, 3, W, 3);
+  // Intersection markers where Elmwood Ave crosses
+  fillRect(34, 3, 3, 3, T.INTERSECTION);
+
+  // ── Elmwood Ave: north-south, cols 35–36 (2 tiles wide) ───────
+  drawVRoad(35, 0, H, 2);
+  // Re-mark the Dodge/Elmwood intersection
+  fillRect(35, 3, 2, 3, T.INTERSECTION);
+
+  // ── Elmwood Park loop road ─────────────────────────────────────
+  // Outer loop: rough oval in western half (cols 6–30, rows 12–55)
+  // Top straight
+  drawSegment(6, 12, 30, 12, T.ASPHALT, 2);
+  // Right side going down
+  drawSegment(30, 12, 32, 35, T.ASPHALT, 2);
+  // Bottom curve going left
+  drawSegment(32, 35, 28, 52, T.ASPHALT, 2);
+  drawSegment(28, 52, 10, 55, T.ASPHALT, 2);
+  // Left side going up
+  drawSegment(10, 55, 6, 40, T.ASPHALT, 2);
+  drawSegment(6, 40, 6, 12, T.ASPHALT, 2);
+  // Inner connector road
+  drawSegment(18, 14, 18, 53, T.DIRT, 1);
+  drawSegment(10, 33, 30, 33, T.DIRT, 1);
+
+  // ── Park interior grass (already grass, just add tree clusters) ──
+  // Scattered trees in park zone
+  const treePosns = [
+    [9,15],[12,18],[15,22],[8,28],[20,20],[24,16],[11,40],[16,36],
+    [22,42],[26,38],[14,47],[20,50],[28,44],[8,50],[25,28],
+  ];
+  for (const [tx, ty] of treePosns) {
+    fillRect(tx, ty, 2, 2, T.TREE);
+  }
+
+  // ── Park dirt paths ────────────────────────────────────────────
+  // Path connecting Elmwood Ave to loop
+  drawSegment(35, 15, 30, 15, T.DIRT, 1);
+  drawSegment(35, 35, 32, 35, T.DIRT, 1);
+
+  // ── UNO Campus zone: eastern half (cols 40–78, rows 8–55) ─────
+  // Campus road grid (internal)
+  drawHRoad(40, 10, 35, 2); // North campus road
+  drawHRoad(40, 28, 35, 2); // Mid campus road
+  drawHRoad(40, 45, 35, 2); // South campus road
+  drawVRoad(42, 8, 40, 2);  // West campus road
+  drawVRoad(55, 8, 40, 2);  // Center campus road
+  drawVRoad(70, 8, 40, 2);  // East campus road
+
+  // Campus intersections
+  fillRect(42, 10, 2, 2, T.INTERSECTION);
+  fillRect(55, 10, 2, 2, T.INTERSECTION);
+  fillRect(70, 10, 2, 2, T.INTERSECTION);
+  fillRect(42, 28, 2, 2, T.INTERSECTION);
+  fillRect(55, 28, 2, 2, T.INTERSECTION);
+  fillRect(70, 28, 2, 2, T.INTERSECTION);
+  fillRect(42, 45, 2, 2, T.INTERSECTION);
+  fillRect(55, 45, 2, 2, T.INTERSECTION);
+  fillRect(70, 45, 2, 2, T.INTERSECTION);
+
+  // Connect campus to Dodge Street
+  fillRect(42, 3, 2, 7, T.ASPHALT);
+  fillRect(55, 3, 2, 7, T.ASPHALT);
+  fillRect(70, 3, 2, 7, T.ASPHALT);
+
+  // Connect campus to Elmwood Ave
+  fillRect(35, 10, 7, 2, T.ASPHALT);
+  fillRect(35, 28, 7, 2, T.ASPHALT);
+  fillRect(35, 45, 7, 2, T.ASPHALT);
+
+  // ── UNO Buildings ──────────────────────────────────────────────
+  // Arts & Sciences Hall (large central building)
+  fillRect(44, 12, 9, 14, T.BUILDING);
+  // Weber Fine Arts (distinctive)
+  fillRect(57, 12, 11, 8, T.BUILDING);
+  // Library / Admin
+  fillRect(44, 30, 9, 13, T.BUILDING);
+  // Science Hall
+  fillRect(57, 31, 7, 11, T.BUILDING);
+  // Small halls
+  fillRect(65, 12, 3, 6, T.BUILDING);
+  fillRect(72, 12, 4, 8, T.BUILDING);
+  fillRect(65, 30, 4, 9, T.BUILDING);
+  fillRect(72, 31, 4, 7, T.BUILDING);
+  // South campus buildings
+  fillRect(44, 47, 6, 7, T.BUILDING);
+  fillRect(57, 47, 8, 7, T.BUILDING);
+
+  // ── Parking lots: east side of campus ─────────────────────────
+  fillRect(62, 22, 7, 5, T.PARKING);
+  fillRect(72, 22, 6, 5, T.PARKING);
+  fillRect(62, 38, 7, 6, T.PARKING);
+  fillRect(72, 38, 6, 6, T.PARKING);
+  // Add parking stripes (center marking as visual hint)
+  for (let py = 22; py < 27; py++) markings[idx(65, py)] = true;
+  for (let py = 22; py < 27; py++) markings[idx(75, py)] = true;
+  for (let py = 38; py < 44; py++) markings[idx(65, py)] = true;
+  for (let py = 38; py < 44; py++) markings[idx(75, py)] = true;
+
+  // ── Void border ───────────────────────────────────────────────
+  for (let x = 0; x < W; x++) {
+    tiles[idx(x, 0)] = T.VOID;
+    tiles[idx(x, H - 1)] = T.VOID;
+  }
+  for (let y = 0; y < H; y++) {
+    tiles[idx(0, y)] = T.VOID;
+    tiles[idx(W - 1, y)] = T.VOID;
+  }
+
+  // ── Build collision ───────────────────────────────────────────
+  for (let i = 0; i < W * H; i++) {
+    collision[i] = TILE_COLLIDABLE[tiles[i]] === true;
+  }
+
+  return { tiles, collision, markings, width: W, height: H };
+}
+
+// ── Tileset (procedural, offscreen canvas) ──────────────────────────────────
+let tilesetCanvas = null;
+
+const TILEMAP = {
+  0:  { sx: 0,   sy: 0 },
+  1:  { sx: 64,  sy: 0 },
+  2:  { sx: 128, sy: 0 },
+  3:  { sx: 192, sy: 0 },
+  4:  { sx: 256, sy: 0 },
+  5:  { sx: 320, sy: 0 },
+  6:  { sx: 384, sy: 0 },
+  7:  { sx: 448, sy: 0 },
+  8:  { sx: 512, sy: 0 },
+  10: { sx: 576, sy: 0 },
+};
+
+function buildTileset() {
+  tilesetCanvas = document.createElement('canvas');
+  tilesetCanvas.width = 1024;
+  tilesetCanvas.height = 256;
+  const c = tilesetCanvas.getContext('2d');
+  const S = TILE_SIZE;
+
+  function drawTile(id, drawFn) {
+    const { sx, sy } = TILEMAP[id];
+    c.save();
+    c.translate(sx, sy);
+    drawFn(c, S);
+    c.restore();
+  }
+
+  function noise(c, s, color, count) {
+    c.fillStyle = color;
+    for (let i = 0; i < count; i++) {
+      c.fillRect(
+        Math.random() * s | 0,
+        Math.random() * s | 0,
+        2, 2
+      );
+    }
+  }
+
+  // Void
+  drawTile(0, (c, s) => {
+    c.fillStyle = '#0A0A0A';
+    c.fillRect(0, 0, s, s);
+    noise(c, s, '#111', 6);
+  });
+
+  // Asphalt
+  drawTile(1, (c, s) => {
+    c.fillStyle = '#2C2C38';
+    c.fillRect(0, 0, s, s);
+    noise(c, s, '#353545', 20);
+    noise(c, s, '#222230', 15);
+  });
+
+  // Intersection
+  drawTile(2, (c, s) => {
+    c.fillStyle = '#323244';
+    c.fillRect(0, 0, s, s);
+    noise(c, s, '#3A3A50', 20);
+    // crosswalk stripes
+    c.fillStyle = '#EEEECC';
+    for (let i = 2; i < s; i += 10) {
+      c.fillRect(i, 4, 5, 6);
+      c.fillRect(i, s - 10, 5, 6);
+      c.fillRect(4, i, 6, 5);
+      c.fillRect(s - 10, i, 6, 5);
+    }
+  });
+
+  // Sidewalk
+  drawTile(3, (c, s) => {
+    c.fillStyle = '#C4B48C';
+    c.fillRect(0, 0, s, s);
+    noise(c, s, '#D0C09A', 18);
+    noise(c, s, '#B0A07A', 12);
+    // cracks
+    c.fillStyle = '#A09070';
+    c.fillRect(8, 0, 1, s);
+    c.fillRect(24, 0, 1, s);
+    c.fillRect(40, 0, 1, s);
+    c.fillRect(56, 0, 1, s);
+  });
+
+  // Grass
+  drawTile(4, (c, s) => {
+    c.fillStyle = '#2E6A20';
+    c.fillRect(0, 0, s, s);
+    noise(c, s, '#386828', 30);
+    noise(c, s, '#245018', 20);
+    noise(c, s, '#3A7A24', 15);
+  });
+
+  // Dirt Path
+  drawTile(5, (c, s) => {
+    c.fillStyle = '#7A5A18';
+    c.fillRect(0, 0, s, s);
+    noise(c, s, '#8B6820', 25);
+    noise(c, s, '#6A4C10', 18);
+    noise(c, s, '#9B7830', 10);
+  });
+
+  // Parking Lot
+  drawTile(6, (c, s) => {
+    c.fillStyle = '#383848';
+    c.fillRect(0, 0, s, s);
+    noise(c, s, '#404055', 15);
+    // parking stripes
+    c.fillStyle = '#DDDDBB';
+    c.fillRect(s / 2 - 1, 4, 2, s - 8);
+    c.fillRect(4, s / 2 - 1, s - 8, 2);
+  });
+
+  // Building
+  drawTile(7, (c, s) => {
+    c.fillStyle = '#5A4A3C';
+    c.fillRect(0, 0, s, s);
+    // shadow/border
+    c.fillStyle = '#3A2A1C';
+    c.fillRect(0, 0, s, 4);
+    c.fillRect(0, 0, 4, s);
+    // roof detail
+    c.fillStyle = '#6A5A4C';
+    c.fillRect(6, 6, s - 12, s - 12);
+    c.fillStyle = '#7A6A5C';
+    c.fillRect(10, 10, s - 20, s - 20);
+    // windows
+    c.fillStyle = '#AACCFF';
+    c.fillRect(14, 14, 8, 6);
+    c.fillRect(26, 14, 8, 6);
+    c.fillRect(38, 14, 8, 6);
+    c.fillRect(14, 28, 8, 6);
+    c.fillRect(26, 28, 8, 6);
+    c.fillRect(38, 28, 8, 6);
+    c.fillRect(14, 42, 8, 6);
+    c.fillRect(26, 42, 8, 6);
+    c.fillRect(38, 42, 8, 6);
+  });
+
+  // Tree Cluster
+  drawTile(8, (c, s) => {
+    c.fillStyle = '#184A10';
+    c.fillRect(0, 0, s, s);
+    // tree canopies
+    const trees = [[16,16,18],[48,12,14],[12,44,16],[44,44,12],[32,32,20]];
+    for (const [tx, ty, r] of trees) {
+      c.fillStyle = '#206010';
+      c.beginPath();
+      c.arc(tx, ty, r, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#2A8018';
+      c.beginPath();
+      c.arc(tx - 3, ty - 3, r * 0.6, 0, Math.PI * 2);
+      c.fill();
+    }
+    noise(c, s, '#0A2808', 8);
+  });
+
+  // Curb (ID 10 → sx=576)
+  drawTile(10, (c, s) => {
+    c.fillStyle = '#909080';
+    c.fillRect(0, 0, s, s);
+    noise(c, s, '#A0A090', 15);
+    noise(c, s, '#7A7A6A', 10);
+    c.fillStyle = '#B0B0A0';
+    c.fillRect(0, 0, s, 3);
+    c.fillRect(0, s - 3, s, 3);
+    c.fillRect(0, 0, 3, s);
+    c.fillRect(s - 3, 0, 3, s);
+  });
+}
+
+function getTileFriction(tileId) {
+  return TILE_FRICTION[tileId] ?? CONFIG.offTrackFriction;
+}
+
+function getTileAt(worldX, worldY) {
+  if (!MAP) return T.VOID;
+  const tx = Math.floor(worldX / TILE_SIZE);
+  const ty = Math.floor(worldY / TILE_SIZE);
+  if (tx < 0 || tx >= MAP.width || ty < 0 || ty >= MAP.height) return T.VOID;
+  return MAP.tiles[ty * MAP.width + tx];
+}
+
+function isTileCollidable(worldX, worldY) {
+  if (!MAP) return true;
+  const tx = Math.floor(worldX / TILE_SIZE);
+  const ty = Math.floor(worldY / TILE_SIZE);
+  if (tx < 0 || tx >= MAP.width || ty < 0 || ty >= MAP.height) return true;
+  return MAP.collision[ty * MAP.width + tx] === true;
+}
+
+// ============================================================
+// [CAR]
+// ============================================================
+const car = {
+  x: 0, y: 0,
+  vx: 0, vy: 0,
+  heading: 0,          // radians, 0 = east (+x)
+  speed: 0,
+  steerAngle: 0,       // front wheel angle (player input)
+  yawRate: 0,          // angular velocity (rad/frame) — drives heading
+  drifting: false,
+  currentGripRear: CONFIG.gripRear,
+  slipAngle: 0,
+};
+
+function angleDiff(a, b) {
+  let d = a - b;
+  while (d >  Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// Rear grip lookup.
+// In this physics model, grip is the fraction of lateral velocity preserved per frame.
+// Higher grip → velocity lags behind heading more → larger steady-state slip angle.
+// Three zones:
+//   Normal cornering: gripRear (0.84) → steady-state slip ~0.20 rad at full lock+speed
+//   Drift zone:       lerps toward gripDrift (0.90) → deeper slide, sustains drift
+//   Handbrake:        gripHandbrake (0.92) → aggressive slide entry
+function computeRearGrip(absSlipAngle, handbrake) {
+  if (handbrake) return CONFIG.handbrakeGrip;
+  if (absSlipAngle <= CONFIG.driftThreshold) return CONFIG.gripRear;
+  // Once drifting, slide deepens slightly over the next 0.5 rad of slip
+  const t = Math.min(1.0, (absSlipAngle - CONFIG.driftThreshold) / 0.5);
+  return lerp(CONFIG.gripRear, CONFIG.gripDrift, t);
+}
+
+function updateCar(input) {
+  const throttle  = input.up   ? 1 : (input.down  ? -1 : 0);
+  const steerDir  = input.left ? -1 : (input.right ?  1 : 0);
+  const handbrake = input.handbrake;
+
+  // ── Speed ─────────────────────────────────────────────────────
+  const speed = Math.sqrt(car.vx * car.vx + car.vy * car.vy);
+  car.speed = speed;
+  // Normalized speed [0,1] — steering and yaw scale with this
+  const speedNorm = Math.min(1.0, speed / CONFIG.maxSpeed);
+
+  // ── Front wheel angle (player input) ─────────────────────────
+  car.steerAngle += steerDir * CONFIG.steerSpeed;
+  car.steerAngle *= CONFIG.steerReturn;
+  car.steerAngle  = Math.max(-CONFIG.maxSteer, Math.min(CONFIG.maxSteer, car.steerAngle));
+
+  // ── Heading & right vectors ───────────────────────────────────
+  const hx = Math.cos(car.heading);
+  const hy = Math.sin(car.heading);
+  const rx = -hy;
+  const ry =  hx;
+
+  // ── Decompose velocity into forward + lateral ─────────────────
+  let fwd = car.vx * hx + car.vy * hy;
+  let lat = car.vx * rx + car.vy * ry;
+
+  // ── Slip angle (before heading update) ───────────────────────
+  // Angle between velocity direction and car heading.
+  // Positive = rear sliding in +right direction of car (left turn oversteer).
+  // Negative = rear sliding in -right direction (right turn oversteer).
+  const velDir = Math.atan2(car.vy, car.vx);
+  const rawSlip = speed > 0.4 ? angleDiff(velDir, car.heading) : 0;
+  car.slipAngle = rawSlip;
+
+  // ── Rear grip (slip-angle dependent) ─────────────────────────
+  const absSlip = Math.abs(rawSlip);
+  const grip    = computeRearGrip(absSlip, handbrake);
+  car.currentGripRear = grip;
+
+  // ── Apply lateral grip to velocity ───────────────────────────
+  lat *= grip;
+
+  // ── Throttle / brake ──────────────────────────────────────────
+  if (throttle > 0) {
+    fwd += CONFIG.torque;
+    fwd  = Math.min(fwd, CONFIG.maxSpeed);
+  } else if (throttle < 0) {
+    fwd -= CONFIG.brakeForce;
+    fwd  = Math.max(fwd, -CONFIG.reverseMaxSpeed);
+  } else {
+    fwd *= 0.99;
+  }
+
+  // ── Reconstruct velocity from forward + damped lateral ────────
+  car.vx = fwd * hx + lat * rx;
+  car.vy = fwd * hy + lat * ry;
+
+  // ── Yaw rate physics ──────────────────────────────────────────
+  // Steering defines a TARGET yaw rate (how fast the car wants to rotate).
+  // yawRate lerps toward the target each frame — gives rotational inertia.
+  // When steering is released, target = 0 and yawRate decays naturally.
+  const targetYaw = car.steerAngle * speedNorm * CONFIG.steerYawFactor;
+  car.yawRate = lerp(car.yawRate, targetYaw, CONFIG.yawLerp);
+
+  // Oversteer: when rear grip is lost, slip angle drives ADDITIONAL yaw.
+  // This is additive — at full slip with no countersteer, it accumulates into a spinout.
+  // Countersteer (opposite stick) shrinks steerAngle → shrinks targetYaw → yawRate reverses → catches spin.
+  // Sign: -rawSlip so that a right-turn slide (rawSlip < 0) adds CW rotation (positive yaw).
+  const overSteerYaw = -rawSlip * (1.0 - grip) * CONFIG.oversteerFactor;
+  car.yawRate += overSteerYaw;
+
+  car.heading += car.yawRate;
+
+  // ── Surface friction ──────────────────────────────────────────
+  const tileId  = getTileAt(car.x, car.y);
+  const tileFric = getTileFriction(tileId);
+  car.vx *= tileFric;
+  car.vy *= tileFric;
+
+  // ── Integrate position with axis-separated collision ──────────
+  const nextX = car.x + car.vx;
+  const nextY = car.y + car.vy;
+  const colX  = isTileCollidable(nextX, car.y);
+  const colY  = isTileCollidable(car.x, nextY);
+
+  if (!colX) car.x = nextX;
+  else { car.vx *= -0.25; car.yawRate *= 0.5; }
+
+  if (!colY) car.y = nextY;
+  else { car.vy *= -0.25; car.yawRate *= 0.5; }
+
+  // ── Drift state ───────────────────────────────────────────────
+  car.drifting = absSlip > CONFIG.driftThreshold;
+
+  STATE.slipAngle = car.slipAngle;
+  STATE.drifting  = car.drifting;
+}
+
+// ============================================================
+// [INPUT]
+// ============================================================
+const INPUT = { up: false, down: false, left: false, right: false, handbrake: false };
+
+window.addEventListener('keydown', e => {
+  switch (e.code) {
+    case 'KeyW': case 'ArrowUp':    INPUT.up        = true; break;
+    case 'KeyS': case 'ArrowDown':  INPUT.down      = true; break;
+    case 'KeyA': case 'ArrowLeft':  INPUT.left      = true; break;
+    case 'KeyD': case 'ArrowRight': INPUT.right     = true; break;
+    case 'Space':                   INPUT.handbrake = true;
+      e.preventDefault(); break;
+  }
+});
+
+window.addEventListener('keyup', e => {
+  switch (e.code) {
+    case 'KeyW': case 'ArrowUp':    INPUT.up        = false; break;
+    case 'KeyS': case 'ArrowDown':  INPUT.down      = false; break;
+    case 'KeyA': case 'ArrowLeft':  INPUT.left      = false; break;
+    case 'KeyD': case 'ArrowRight': INPUT.right     = false; break;
+    case 'Space':                   INPUT.handbrake = false; break;
+  }
+});
+
+// ============================================================
+// [SCORING]
+// ============================================================
+function updateScoring() {
+  const wasDrifting = STATE.wasDrifting;
+
+  if (STATE.drifting) {
+    // Drift started this frame
+    if (!wasDrifting) {
+      if (STATE.comboTimer < CONFIG.comboWindow) {
+        STATE.combo = Math.min(STATE.combo + 1, CONFIG.maxCombo);
+      } else {
+        STATE.combo = 1;
       }
-      for (let y = 0; y < MAP.height; y += 100) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(MAP.width, y);
-        ctx.stroke();
+      STATE.comboTimer = 0;
+    }
+    const pts = CONFIG.scorePerFrame + (Math.abs(STATE.slipAngle) * CONFIG.angleMultiplier);
+    STATE.score += pts * STATE.combo;
+    STATE.comboTimer = 0;
+  } else {
+    if (wasDrifting) {
+      // Drift just ended — start combo timer
+    }
+    STATE.comboTimer++;
+    if (STATE.comboTimer > CONFIG.comboWindow) {
+      // Don't reset combo until next drift starts
+    }
+  }
+
+  STATE.wasDrifting = STATE.drifting;
+}
+
+// ============================================================
+// [RENDERER]
+// ============================================================
+let canvas, ctx;
+let tireCanvas, tireCtx;
+let camera = { x: 0, y: 0 };
+
+const MAX_TIRE_MARKS = 3000;
+let tireMarks = []; // [{x,y}]
+
+function drawTileGrid() {
+  if (!MAP || !tilesetCanvas) return;
+
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+
+  const startTX = Math.floor((camera.x - halfW) / TILE_SIZE) - 1;
+  const startTY = Math.floor((camera.y - halfH) / TILE_SIZE) - 1;
+  const endTX   = startTX + Math.ceil(canvas.width  / TILE_SIZE) + 3;
+  const endTY   = startTY + Math.ceil(canvas.height / TILE_SIZE) + 3;
+
+  for (let ty = startTY; ty <= endTY; ty++) {
+    for (let tx = startTX; tx <= endTX; tx++) {
+      let tileId = T.VOID;
+      if (tx >= 0 && tx < MAP.width && ty >= 0 && ty < MAP.height) {
+        tileId = MAP.tiles[ty * MAP.width + tx];
       }
-      
-      // Draw car
-      drawCarSprite(car.x, car.y, car.heading, false);
-    }
+      const tm = TILEMAP[tileId] || TILEMAP[0];
+      const screenX = tx * TILE_SIZE - camera.x + halfW;
+      const screenY = ty * TILE_SIZE - camera.y + halfH;
 
-    // ============================================================
-    // [HUD] — Overlay UI
-    // ============================================================
-    function renderHUD() {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(0, 0, 300, 200);
-      
-      ctx.fillStyle = '#fff';
-      ctx.font = '16px Courier New';
-      ctx.textBaseline = 'top';
-      
-      const speed = Math.sqrt(car.vx * car.vx + car.vy * car.vy).toFixed(1);
-      const score = Math.floor(state.score);
-      const combo = state.combo;
-      const driftStatus = car.drifting ? 'DRIFTING' : 'GROUNDED';
-      
-      ctx.fillText(`Speed: ${speed}`, 20, 20);
-      ctx.fillText(`Score: ${score}`, 20, 50);
-      ctx.fillText(`Combo: ${combo}x`, 20, 80);
-      ctx.fillText(`Status: ${driftStatus}`, 20, 110);
-      ctx.fillText(`Frame: ${state.frameCount}`, 20, 140);
-      
-      // Instructions
-      ctx.font = '12px Courier New';
-      ctx.fillText('W/S: Gas/Brake | A/D: Steer', 20, 170);
+      ctx.drawImage(
+        tilesetCanvas,
+        tm.sx, tm.sy, TILE_SIZE, TILE_SIZE,
+        screenX, screenY, TILE_SIZE, TILE_SIZE
+      );
     }
+  }
+}
 
-    // ============================================================
-    // [LOOP] — Main game loop
-    // ============================================================
-    function gameLoop() {
-      state.frameCount++;
-      
-      car.update();
-      updateScoring();
-      render();
-      renderHUD();
-      
-      requestAnimationFrame(gameLoop);
+function drawRoadMarkings() {
+  if (!MAP) return;
+
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+  const startTX = Math.floor((camera.x - halfW) / TILE_SIZE) - 1;
+  const startTY = Math.floor((camera.y - halfH) / TILE_SIZE) - 1;
+  const endTX   = startTX + Math.ceil(canvas.width  / TILE_SIZE) + 3;
+  const endTY   = startTY + Math.ceil(canvas.height / TILE_SIZE) + 3;
+
+  ctx.fillStyle = '#FFDD00';
+  for (let ty = startTY; ty <= endTY; ty++) {
+    for (let tx = startTX; tx <= endTX; tx++) {
+      if (tx < 0 || tx >= MAP.width || ty < 0 || ty >= MAP.height) continue;
+      if (!MAP.markings[ty * MAP.width + tx]) continue;
+
+      const screenX = tx * TILE_SIZE - camera.x + halfW;
+      const screenY = ty * TILE_SIZE - camera.y + halfH;
+
+      // Dashed center line — two rectangles with a gap
+      ctx.fillRect(screenX + 28, screenY + 4,  4, 24);
+      ctx.fillRect(screenX + 28, screenY + 36, 4, 24);
     }
+  }
+}
 
-    // Start game
-    gameLoop();
-  </script>
+function drawTireMarks() {
+  if (tireMarks.length === 0) return;
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+  ctx.fillStyle = '#181818';
+  for (const m of tireMarks) {
+    const sx = m.x - camera.x + halfW;
+    const sy = m.y - camera.y + halfH;
+    if (sx < -10 || sx > canvas.width + 10 || sy < -10 || sy > canvas.height + 10) continue;
+    ctx.fillRect(sx - 1, sy - 1, 3, 3);
+  }
+}
+
+function addTireMark(wx, wy) {
+  tireMarks.push({ x: wx, y: wy });
+  if (tireMarks.length > MAX_TIRE_MARKS) tireMarks.shift();
+}
+
+function updateTireMarks() {
+  if (!car.drifting) return;
+
+  const cos = Math.cos(car.heading);
+  const sin = Math.sin(car.heading);
+  const rcos = Math.cos(car.heading + Math.PI / 2);
+  const rsin = Math.sin(car.heading + Math.PI / 2);
+  const BACK  = 14;
+  const SIDE  = 9;
+
+  // Rear-left
+  addTireMark(
+    car.x + rcos * SIDE  - cos * BACK,
+    car.y + rsin * SIDE  - sin * BACK
+  );
+  // Rear-right
+  addTireMark(
+    car.x - rcos * SIDE  - cos * BACK,
+    car.y - rsin * SIDE  - sin * BACK
+  );
+}
+
+// ── Car sprite ──────────────────────────────────────────────
+// Drawn on a 12×20 virtual grid scaled to 36×60px, centered at origin
+const CAR_PALETTE_NORMAL = {
+  body:   '#2244CC',
+  window: '#88AAFF',
+  wheel:  '#111111',
+  trim:   '#FFFFFF',
+  light:  '#FF4444',
+};
+const CAR_PALETTE_DRIFT = {
+  body:   '#FF4422',
+  window: '#FFAA88',
+  wheel:  '#111111',
+  trim:   '#FFFF00',
+  light:  '#FFAA00',
+};
+
+function drawCar() {
+  const pal = car.drifting ? CAR_PALETTE_DRIFT : CAR_PALETTE_NORMAL;
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+  const sx = car.x - camera.x + halfW;
+  const sy = car.y - camera.y + halfH;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+  // +PI/2 aligns the sprite (front = local -y) to the physics (heading=0 → east/+x)
+  ctx.rotate(car.heading + Math.PI / 2);
+
+  const S = 3; // scale factor: 1 virtual unit = 3px
+  const W = 12 * S; // 36px
+  const H = 20 * S; // 60px
+
+  // Body
+  ctx.fillStyle = pal.body;
+  ctx.fillRect(-W / 2, -H / 2, W, H);
+
+  // Windshield (front)
+  ctx.fillStyle = pal.window;
+  ctx.fillRect(-W / 2 + S * 1, -H / 2 + S * 2, W - S * 2, S * 4);
+
+  // Rear window
+  ctx.fillStyle = pal.window;
+  ctx.fillRect(-W / 2 + S * 2, H / 2 - S * 6, W - S * 4, S * 3);
+
+  // Trim stripe
+  ctx.fillStyle = pal.trim;
+  ctx.fillRect(-W / 2, -S, W, S);
+
+  // Front wheels
+  ctx.fillStyle = pal.wheel;
+  ctx.fillRect(-W / 2 - S, -H / 2 + S * 3, S * 2, S * 4);
+  ctx.fillRect( W / 2 - S, -H / 2 + S * 3, S * 2, S * 4);
+
+  // Rear wheels
+  ctx.fillRect(-W / 2 - S, H / 2 - S * 7, S * 2, S * 4);
+  ctx.fillRect( W / 2 - S, H / 2 - S * 7, S * 2, S * 4);
+
+  // Tail lights
+  ctx.fillStyle = pal.light;
+  ctx.fillRect(-W / 2,         H / 2 - S * 2, S * 3, S * 2);
+  ctx.fillRect( W / 2 - S * 3, H / 2 - S * 2, S * 3, S * 2);
+
+  ctx.restore();
+}
+
+function render() {
+  ctx.fillStyle = '#0A0A0A';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Update camera (smooth follow)
+  camera.x = lerp(camera.x, car.x, 0.12);
+  camera.y = lerp(camera.y, car.y, 0.12);
+
+  // 1. Ground / tile grid
+  drawTileGrid();
+
+  // 2. Tire marks (persistent)
+  drawTireMarks();
+
+  // 3. Road markings
+  drawRoadMarkings();
+
+  // 4. Car
+  drawCar();
+
+  // 5. HUD
+  drawHUD();
+}
+
+// ============================================================
+// [HUD]
+// ============================================================
+function drawHUD() {
+  const speedKmh = Math.round(Math.sqrt(car.vx * car.vx + car.vy * car.vy) * 18);
+  const scoreDisplay = Math.floor(STATE.score);
+
+  ctx.save();
+
+  // Score box (top-left)
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(12, 12, 180, 80);
+
+  ctx.fillStyle = '#888888';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText('SCORE', 24, 32);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 28px monospace';
+  ctx.fillText(scoreDisplay.toLocaleString(), 24, 62);
+
+  // Combo
+  if (STATE.combo > 1) {
+    ctx.fillStyle = '#FFDD00';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText(`x${STATE.combo} COMBO`, 24, 84);
+  }
+
+  // Speed (top-right)
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(canvas.width - 140, 12, 128, 50);
+  ctx.fillStyle = '#888888';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText('SPEED', canvas.width - 128, 32);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 22px monospace';
+  ctx.fillText(`${speedKmh} km/h`, canvas.width - 128, 54);
+
+  // DRIFT flash
+  if (car.drifting) {
+    const alpha = (STATE.frame % 16 < 8) ? 1.0 : 0.5;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#FF6600';
+    ctx.font = 'bold 48px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('DRIFT!', canvas.width / 2, canvas.height / 2 - 60);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  // Controls hint (bottom)
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
+  ctx.fillStyle = '#666666';
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake', canvas.width / 2, canvas.height - 10);
+  ctx.textAlign = 'left';
+
+  ctx.restore();
+}
+
+// ============================================================
+// [LOOP]
+// ============================================================
+function gameLoop() {
+  STATE.frame++;
+  updateCar(INPUT);
+  updateScoring();
+  updateTireMarks();
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+
+function init() {
+  canvas = document.getElementById('game');
+  ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  // Build tileset
+  buildTileset();
+
+  // Build map
+  MAP = buildPlaceholderMap();
+
+  // Spawn car at Dodge St / Elmwood Ave intersection
+  // Dodge St: rows 3–5, Elmwood Ave: cols 35–36
+  // Center of intersection tile 35, 4
+  car.x = (35 + 0.5) * TILE_SIZE; // ~2272 px
+  car.y = (4  + 0.5) * TILE_SIZE; // ~288 px
+  car.heading = 0; // facing east
+
+  camera.x = car.x;
+  camera.y = car.y;
+
+  requestAnimationFrame(gameLoop);
+}
+
+init();
+</script>
 </body>
 </html>
