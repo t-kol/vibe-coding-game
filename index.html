@@ -632,6 +632,8 @@ window.addEventListener('keydown', e => {
     case 'KeyD': case 'ArrowRight': INPUT.right     = true; break;
     case 'Space':                   INPUT.handbrake = true;
       e.preventDefault(); break;
+    case 'KeyP':
+      window.location.href = 'Maverick-Mini-Golf/index.html'; break;
   }
 });
 
@@ -930,7 +932,7 @@ function drawHUD() {
   ctx.fillStyle = '#666666';
   ctx.font = '12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake', canvas.width / 2, canvas.height - 10);
+  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake — P: Switch Minigame', canvas.width / 2, canvas.height - 10);
   ctx.textAlign = 'left';
 
   ctx.restore();

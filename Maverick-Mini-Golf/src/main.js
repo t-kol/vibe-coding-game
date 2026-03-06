@@ -189,8 +189,30 @@ class Game {
     this._lastTime = timestamp;
 
     this.input.beginFrame();
-    this._update(dt);
-    this._draw();
+    try {
+      this._update(dt);
+      this._draw();
+    } catch (err) {
+      // Render the error message directly onto the canvas so it's visible
+      const ctx = this.renderer.ctx2d;
+      ctx.fillStyle = '#1A0000';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#FF4444';
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('RUNTIME ERROR:', 4, 4);
+      ctx.fillStyle = '#FFAAAA';
+      ctx.font = '6px monospace';
+      const msg = String(err.message || err);
+      const stack = String(err.stack || '').split('\n').slice(0, 6).join('\n');
+      const lines = (msg + '\n' + stack).split('\n');
+      lines.forEach((line, i) => {
+        const trimmed = line.substring(0, 52);
+        ctx.fillText(trimmed, 4, 18 + i * 9);
+      });
+      console.error('[Game] Loop error:', err);
+    }
     this.input.endFrame();
 
     requestAnimationFrame(this._loop.bind(this));
@@ -721,5 +743,33 @@ class Game {
 // ============================================================
 
 window.addEventListener('DOMContentLoaded', () => {
-  new Game();
+  try {
+    new Game();
+  } catch (err) {
+    // If the Game constructor itself throws, draw the error on the canvas
+    const canvas = document.getElementById('gameCanvas');
+    if (canvas) {
+      canvas.width  = 320;
+      canvas.height = 180;
+      canvas.style.width  = '1280px';
+      canvas.style.height = '720px';
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#1A0000';
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = '#FF4444';
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('INIT ERROR:', 4, 4);
+      ctx.fillStyle = '#FFAAAA';
+      ctx.font = '6px monospace';
+      const msg = String(err.message || err);
+      const stack = String(err.stack || '').split('\n').slice(0, 8).join('\n');
+      const lines = (msg + '\n' + stack).split('\n');
+      lines.forEach((line, i) => {
+        ctx.fillText(line.substring(0, 52), 4, 18 + i * 9);
+      });
+    }
+    console.error('[Game] Init error:', err);
+  }
 });

@@ -1,0 +1,60 @@
+BUILDING ROOFTOP DECALS
+=======================
+
+These are transparent PNG overlays drawn on top of the base BUILDING tile to
+give named UNO campus buildings a unique identity. Each decal covers the full
+pixel footprint of its building (tile count x 64px).
+
+The base building tile (from tileset.png index 7) is already drawn underneath.
+The decal just adds unique rooftop markings on top.
+
+FORMAT: PNG with transparency, 16-bit pixel art style.
+
+FILES NEEDED:
+
+  arts_sciences.png
+    Building: Arts & Sciences Hall (largest building on campus)
+    Tile footprint: 9 tiles wide x 14 tiles tall
+    Pixel size: 576 x 896px
+    Rooftop features:
+      - Large "A&S" text label in UNO red (#C8102E), centered
+      - Red accent stripe across the full width at mid-height
+      - Subtle rooftop HVAC/vent equipment cluster near top edge
+
+  weber_arts.png
+    Building: Weber Fine Arts Building
+    Tile footprint: 11 tiles wide x 8 tiles tall
+    Pixel size: 704 x 512px
+    Rooftop features:
+      - Skylight grid pattern (3x2 grid of glass panels) in #AACCFF
+      - Warmer brown roof tint (slightly more red-brown than base tile)
+      - Small "WEBER" text label in white
+
+  library.png
+    Building: Criss Library / Administration
+    Tile footprint: 9 tiles wide x 13 tiles tall
+    Pixel size: 576 x 832px
+    Rooftop features:
+      - Circular dome or cupola marker in center (#D0C090 gold-tan)
+      - "LIBRARY" text label in dark contrast color
+      - Decorative border ring around the dome
+
+  science.png
+    Building: Science Hall
+    Tile footprint: 7 tiles wide x 11 tiles tall
+    Pixel size: 448 x 704px
+    Rooftop features:
+      - HVAC/equipment cluster (3-4 boxy units) near center
+      - Exhaust vent pipes (small rectangles) along one edge
+      - "SCI" text label in white
+
+ALTERNATIVE (simpler to generate):
+  Instead of decals, generate 4 unique 64x64px tile variants with different
+  rooftop color schemes and minimal labels. Place them in tiles/ and reference
+  by a separate tile ID for each named building. This avoids large image sizes.
+
+GENERATION PROMPT SUGGESTION (per building):
+"Top-down pixel art rooftop overlay for a UNO campus building, transparent
+PNG background, 16-bit GTA 1 style. [Building name], [pixel dimensions].
+Features: [describe features listed above]. Must blend with a brown (#5A4A3C)
+base building tile drawn underneath."

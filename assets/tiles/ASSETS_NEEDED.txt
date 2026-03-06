@@ -1,0 +1,61 @@
+TILE SPRITES
+============
+
+All 10 tiles packed into a single horizontal sprite sheet: tileset.png
+Sheet size: 640x64px (10 tiles x 64px wide, 1 tile tall)
+
+Tiles are indexed left-to-right. The game reads them by multiplying the tile
+index by 64 to get the X offset in the sheet.
+
+INDEX | NAME         | DESCRIPTION
+------+--------------+-------------------------------------------------------------
+  0   | VOID         | Near-black (#0A0A0A) with faint #111 noise particles.
+      |              | Represents out-of-bounds / impassable border.
+------+--------------+-------------------------------------------------------------
+  1   | ASPHALT      | Dark gray-purple (#2C2C38) road surface with fine texture
+      |              | noise in #353545 and #222230. Smooth, worn urban road.
+------+--------------+-------------------------------------------------------------
+  2   | INTERSECTION | Same base as asphalt (#323244), but with cream (#EEEECC)
+      |              | zebra crosswalk stripes on all 4 sides of the tile.
+      |              | Stripes run edge-to-edge, 5px wide, every 10px.
+------+--------------+-------------------------------------------------------------
+  3   | SIDEWALK     | Tan/beige base (#C4B48C) with lighter noise (#D0C09A) and
+      |              | darker noise (#B0A07A). Vertical crack lines in #A09070
+      |              | at x=8, x=24, x=40, x=56 (concrete slab seams).
+------+--------------+-------------------------------------------------------------
+  4   | GRASS        | Lush green (#2E6A20) with multiple noise layers:
+      |              | #386828 (lighter), #245018 (darker), #3A7A24 (bright).
+      |              | Natural park/campus lawn appearance.
+------+--------------+-------------------------------------------------------------
+  5   | DIRT         | Warm brown base (#7A5A18) with noise in #8B6820, #6A4C10,
+      |              | and #9B7830. Natural earth trail through Elmwood Park.
+------+--------------+-------------------------------------------------------------
+  6   | PARKING      | Dark gray (#383848) with subtle noise (#404055).
+      |              | Cream (#DDDDBB) parking space divider lines:
+      |              | vertical stripe at x=31-32, horizontal stripe at y=31-32.
+------+--------------+-------------------------------------------------------------
+  7   | BUILDING     | Brown roof (#5A4A3C) with dark shadow border (#3A2A1C) on
+      |              | top and left edges (3-4px). Lighter inner roof detail
+      |              | (#6A5A4C and #7A6A5C). 9 blue windows (#AACCFF) in a 3x3
+      |              | grid, each 8x6px, centered in the tile.
+      |              | Top-down view of a UNO campus building roof.
+------+--------------+-------------------------------------------------------------
+  8   | TREE         | Dark forest floor (#184A10) with 5 overlapping round
+      |              | canopies (#206010) at positions (16,16), (48,12), (12,44),
+      |              | (44,44), (32,32). Each canopy has a bright highlight arc
+      |              | (#2A8018) offset toward top-left. Dense tree cluster.
+------+--------------+-------------------------------------------------------------
+  9   | CURB         | Gray-green (#909080) with noise in #A0A090 and #7A7A6A.
+      |              | Bright (#B0B0A0) beveled border highlight on all 4 edges
+      |              | (2-3px wide). Concrete curb seen from above.
+------+--------------+-------------------------------------------------------------
+
+GENERATION PROMPT SUGGESTION:
+"16-bit pixel art tileset, GTA 1 top-down view, 10 tiles in a row, each
+64x64px, single 640x64 sprite sheet. Tiles in order: black void, dark asphalt
+road with texture, asphalt intersection with zebra crosswalk markings on all 4
+sides, beige concrete sidewalk with crack lines, green grass with varied
+texture, dirt path, gray parking lot with divider stripe markings, brown
+building rooftop viewed from above with 3x3 grid of blue windows, dark green
+dense tree canopy from above with highlight arcs, gray curb with beveled
+border. All tiles must feel cohesive, same pixel art style and lighting."
