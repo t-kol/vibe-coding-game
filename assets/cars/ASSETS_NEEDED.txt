@@ -1,0 +1,62 @@
+CAR SPRITES
+===========
+
+Two sprite sheets, one per car state. Each sheet contains 8 rotation frames.
+
+SHEET SPECS:
+  Size per frame: 36x60px
+  Frames per sheet: 8 (one every 45 degrees)
+  Total sheet size: 288x60px (horizontal layout)
+  Format: PNG with transparency
+
+ROTATION FRAME ORDER (left to right in the sheet):
+  Frame 0:  0deg   — facing NORTH (up)
+  Frame 1:  45deg  — facing NE
+  Frame 2:  90deg  — facing EAST (right)
+  Frame 3:  135deg — facing SE
+  Frame 4:  180deg — facing SOUTH (down)
+  Frame 5:  225deg — facing SW
+  Frame 6:  270deg — facing WEST (left)
+  Frame 7:  315deg — facing NW
+
+CAR STRUCTURE (top-down view, 36x60px frame, facing NORTH as base):
+  - Main body: full 36x60 area, slightly rounded corners
+  - Front windshield: ~10x4px band near top of car
+  - Rear window: ~8x3px band near bottom of car
+  - Trim stripe: 1px horizontal band across middle of body
+  - Front wheels: 2 wheels at top-left and top-right, ~4x8px each, slightly
+    wider than body edge
+  - Rear wheels: 2 wheels at bottom-left and bottom-right, same size
+  - Tail lights: 2 small rectangles (~3x2px) at bottom corners
+
+FILES NEEDED:
+
+  car_normal.png — Normal driving state
+    Colors:
+      Body:       #2244CC  (UNO blue)
+      Windshield: #88AAFF  (light blue)
+      Rear window:#88AAFF  (light blue)
+      Trim stripe:#FFFFFF  (white)
+      Wheels:     #111111  (near-black)
+      Tail lights:#FF4444  (red)
+
+  car_drift.png — Drifting state (swapped in when player handbrakes)
+    Colors:
+      Body:       #FF4422  (orange-red)
+      Windshield: #FFAA88  (light orange)
+      Rear window:#FFAA88  (light orange)
+      Trim stripe:#FFFF00  (bright yellow)
+      Wheels:     #111111  (near-black)
+      Tail lights:#FFAA00  (amber orange)
+
+GENERATION PROMPT SUGGESTION:
+"Top-down pixel art racing car sprite sheet, 16-bit GTA 1 style. 8 rotation
+frames at 45 degree increments, each frame 36x60px, laid out horizontally on
+a 288x60 transparent PNG. The car is a compact sporty sedan viewed directly
+from above. Frame order: north (up), northeast, east (right), southeast,
+south (down), southwest, west (left), northwest. Include windshield, rear
+window, trim stripe, 4 wheels, and 2 tail lights.
+Blue variant (car_normal.png): body #2244CC, windshield #88AAFF, trim white,
+wheels black, taillights red #FF4444.
+Orange variant (car_drift.png): body #FF4422, windshield #FFAA88, trim
+#FFFF00, wheels black, taillights #FFAA00."

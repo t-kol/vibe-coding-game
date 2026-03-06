@@ -1,0 +1,17 @@
+ELMWOOD DRIFT — ASSET OVERVIEW
+===============================
+
+This folder contains all external assets for the Elmwood Drift driving game.
+See subfolders for specific asset lists and generation specs.
+
+FOLDER STRUCTURE:
+  assets/
+    tiles/         — Map tile sprites (64x64px each, packed into tileset.png)
+    cars/          — Player car sprite sheets (rotation frames)
+    buildings/     — Unique rooftop overlays for named UNO campus buildings
+
+STYLE GUIDE (apply to everything):
+  - 16-bit GTA-1 top-down pixel art
+  - Tile size: 64x64px
+  - UNO brand colors where appropriate: Red #C8102E, Black #1C1C1C
+  - All map assets must feel cohesive — same lighting direction, same pixel density
