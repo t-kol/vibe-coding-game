@@ -104,6 +104,11 @@ const TILE_FRICTION = {
 
 let MAP = null; // set by buildPlaceholderMap()
 
+// support multiple maps and switching
+let mapIndex = 0;
+let MAP_BUILDERS = null;    // populated in init()
+let CURRENT_MAP_NAME = ''; // descriptive string for HUD
+
 function buildPlaceholderMap() {
   const W = 90, H = 70;
   const tiles     = new Array(W * H).fill(T.GRASS);
@@ -285,6 +290,93 @@ function buildPlaceholderMap() {
 
   return { tiles, collision, markings, width: W, height: H };
 }
+
+// ------------------------------------------------------------------
+// new map: Elmwood Park golf-course loop (200×200)
+function buildElmwoodParkMap() {
+  const W = 200, H = 200;
+  const tiles     = new Array(W * H).fill(T.GRASS);
+  const collision = new Array(W * H).fill(false);
+  const markings  = new Array(W * H).fill(false);
+
+  function idx(x, y) { return y * W + x; }
+  function fillRect(x, y, w, h, tileId) {
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        const tx = x + dx, ty = y + dy;
+        if (tx >= 0 && tx < W && ty >= 0 && ty < H) {
+          tiles[idx(tx, ty)] = tileId;
+        }
+      }
+    }
+  }
+
+  function drawSegment(x1, y1, x2, y2, tileId, width) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len === 0) return;
+    const steps = Math.ceil(len * 2);
+    const half = Math.floor(width / 2);
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const cx = Math.round(x1 + dx * t);
+      const cy = Math.round(y1 + dy * t);
+      const px = -dy / len, py = dx / len;
+      for (let w = -half; w <= half; w++) {
+        const tx = Math.round(cx + px * w);
+        const ty = Math.round(cy + py * w);
+        if (tx >= 0 && tx < W && ty >= 0 && ty < H) {
+          tiles[idx(tx, ty)] = tileId;
+        }
+      }
+    }
+  }
+
+  // ── Background ─────────────────────────────────────────
+  // (grass by default)
+
+  // ── Outer loop road around park ─────────────────────────
+  drawSegment(20, 20, 180, 20, T.ASPHALT, 3);
+  drawSegment(180, 20, 180, 180, T.ASPHALT, 3);
+  drawSegment(180, 180, 20, 180, T.ASPHALT, 3);
+  drawSegment(20, 180, 20, 20, T.ASPHALT, 3);
+
+  // ── Inner loop ──────────────────────────────────────────
+  drawSegment(60, 40, 140, 40, T.ASPHALT, 2);
+  drawSegment(140, 40, 140, 140, T.ASPHALT, 2);
+  drawSegment(140, 140, 60, 140, T.ASPHALT, 2);
+  drawSegment(60, 140, 60, 40, T.ASPHALT, 2);
+
+  // ── Dirt connectors ─────────────────────────────────────
+  drawSegment(100, 20, 100, 40, T.DIRT, 1);
+  drawSegment(20, 100, 60, 100, T.DIRT, 1);
+  drawSegment(180, 100, 140, 100, T.DIRT, 1);
+
+  // ── Random trees inside loops ────────────────────────────
+  for (let tx = 30; tx < 170; tx += 15) {
+    for (let ty = 30; ty < 170; ty += 20) {
+      if (Math.random() < 0.2) fillRect(tx, ty, 2, 2, T.TREE);
+    }
+  }
+
+  // ── Void border ─────────────────────────────────────────
+  for (let x = 0; x < W; x++) {
+    tiles[idx(x, 0)] = T.VOID;
+    tiles[idx(x, H - 1)] = T.VOID;
+  }
+  for (let y = 0; y < H; y++) {
+    tiles[idx(0, y)] = T.VOID;
+    tiles[idx(W - 1, y)] = T.VOID;
+  }
+
+  // ── Build collisions ────────────────────────────────────
+  for (let i = 0; i < W * H; i++) {
+    collision[i] = TILE_COLLIDABLE[tiles[i]] === true;
+  }
+
+  return { tiles, collision, markings, width: W, height: H };
+}
+
 
 // ── Tileset (procedural, offscreen canvas) ──────────────────────────────────
 let tilesetCanvas = null;
@@ -913,6 +1005,15 @@ function drawHUD() {
   ctx.font = 'bold 22px monospace';
   ctx.fillText(`${speedKmh} km/h`, canvas.width - 128, 54);
 
+  // Map name (top-center)
+  if (CURRENT_MAP_NAME) {
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`MAP: ${CURRENT_MAP_NAME}`, canvas.width / 2, 32);
+    ctx.textAlign = 'left';
+  }
+
   // DRIFT flash (only when drifting forward)
   const fwd = car.vx * Math.cos(car.heading) + car.vy * Math.sin(car.heading);
   if (STATE.drifting && car.speed > 0 && fwd > 0) {
@@ -955,6 +1056,35 @@ function resizeCanvas() {
   canvas.height = window.innerHeight;
 }
 
+function switchMap() {
+  mapIndex = (mapIndex + 1) % MAP_BUILDERS.length;
+  const info = MAP_BUILDERS[mapIndex];
+  MAP = info.build();
+  CURRENT_MAP_NAME = info.name;
+  document.title = `Elmwood Drift — ${CURRENT_MAP_NAME}`;
+
+  // reset car in a sensible location for the new map
+  if (info.name === 'Elmwood Park') {
+    // place inside outer loop near north section
+    car.x = (100 + 0.5) * TILE_SIZE;
+    car.y = (20  + 0.5) * TILE_SIZE;
+  } else {
+    // default UNO campus spawn
+    car.x = (35 + 0.5) * TILE_SIZE;
+    car.y = (4  + 0.5) * TILE_SIZE;
+  }
+  car.heading = 0;
+  STATE.score = 0;
+  STATE.combo = 1;
+  STATE.comboTimer = 0;
+  STATE.drifting = false;
+  STATE.slipAngle = 0;
+  STATE.wasDrifting = false;
+
+  camera.x = car.x;
+  camera.y = car.y;
+}
+
 function init() {
   canvas = document.getElementById('game');
   ctx = canvas.getContext('2d');
@@ -963,21 +1093,33 @@ function init() {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
-  // Build tileset
+  // build tileset
   buildTileset();
 
-  // Build map
-  MAP = buildPlaceholderMap();
+  // prepare map builders list
+  MAP_BUILDERS = [
+    { name: 'UNO Campus',    build: buildPlaceholderMap },
+    { name: 'Elmwood Park',  build: buildElmwoodParkMap },
+  ];
+  mapIndex = 0;
+  CURRENT_MAP_NAME = MAP_BUILDERS[0].name;
+  document.title = `Elmwood Drift — ${CURRENT_MAP_NAME}`;
+  MAP = MAP_BUILDERS[0].build();
 
-  // Spawn car at Dodge St / Elmwood Ave intersection
-  // Dodge St: rows 3–5, Elmwood Ave: cols 35–36
-  // Center of intersection tile 35, 4
-  car.x = (35 + 0.5) * TILE_SIZE; // ~2272 px
-  car.y = (4  + 0.5) * TILE_SIZE; // ~288 px
+  // initial car spawn (UNO campus start)
+  car.x = (35 + 0.5) * TILE_SIZE;
+  car.y = (4  + 0.5) * TILE_SIZE;
   car.heading = 0; // facing east
 
   camera.x = car.x;
   camera.y = car.y;
+
+  // allow toggling maps with 'M'
+  window.addEventListener('keydown', e => {
+    if (e.key === 'm' || e.key === 'M') {
+      switchMap();
+    }
+  });
 
   requestAnimationFrame(gameLoop);
 }
