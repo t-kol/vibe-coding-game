@@ -801,7 +801,7 @@ const CAR_PALETTE_DRIFT = {
 };
 
 function drawCar() {
-  const pal = car.drifting ? CAR_PALETTE_DRIFT : CAR_PALETTE_NORMAL;
+  const pal = CAR_PALETTE_NORMAL;
   const halfW = canvas.width  / 2;
   const halfH = canvas.height / 2;
   const sx = car.x - camera.x + halfW;
@@ -911,8 +911,9 @@ function drawHUD() {
   ctx.font = 'bold 22px monospace';
   ctx.fillText(`${speedKmh} km/h`, canvas.width - 128, 54);
 
-  // DRIFT flash
-  if (car.drifting) {
+  // DRIFT flash (only when drifting forward)
+  const fwd = car.vx * Math.cos(car.heading) + car.vy * Math.sin(car.heading);
+  if (STATE.drifting && car.speed > 0 && fwd > 0) {
     const alpha = (STATE.frame % 16 < 8) ? 1.0 : 0.5;
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#FF6600';
