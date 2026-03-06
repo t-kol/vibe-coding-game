@@ -23,7 +23,7 @@ const CONFIG = {
   torque:           0.26,
   brakeForce:       0.55,
   maxSpeed:         5.5,
-  reverseMaxSpeed:  2.0,
+  reverseMaxSpeed:  4.5,
 
   // Steering (front wheel angle)
   // Steady-state steerAngle while holding = steerSpeed / (1 - steerReturn)
@@ -580,7 +580,9 @@ function updateCar(input) {
   // Steering defines a TARGET yaw rate (how fast the car wants to rotate).
   // yawRate lerps toward the target each frame — gives rotational inertia.
   // When steering is released, target = 0 and yawRate decays naturally.
-  const targetYaw = car.steerAngle * speedNorm * CONFIG.steerYawFactor;
+  // When reversing (fwd < 0), steering direction is reversed for realistic backup handling.
+  const steerDirection = fwd < 0 ? -1 : 1;
+  const targetYaw = car.steerAngle * speedNorm * CONFIG.steerYawFactor * steerDirection;
   car.yawRate = lerp(car.yawRate, targetYaw, CONFIG.yawLerp);
 
   // Oversteer: when rear grip is lost, slip angle drives ADDITIONAL yaw.
@@ -649,8 +651,8 @@ window.addEventListener('keyup', e => {
 function updateScoring() {
   const wasDrifting = STATE.wasDrifting;
 
-  if (STATE.drifting) {
-    // Drift started this frame
+  if (STATE.drifting && car.speed > 0 && car.vx * Math.cos(car.heading) + car.vy * Math.sin(car.heading) > 0) {
+    // Drift started this frame (only forward, not reverse)
     if (!wasDrifting) {
       if (STATE.comboTimer < CONFIG.comboWindow) {
         STATE.combo = Math.min(STATE.combo + 1, CONFIG.maxCombo);
