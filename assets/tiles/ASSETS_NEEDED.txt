@@ -58,4 +58,4 @@ sides, beige concrete sidewalk with crack lines, green grass with varied
 texture, dirt path, gray parking lot with divider stripe markings, brown
 building rooftop viewed from above with 3x3 grid of blue windows, dark green
 dense tree canopy from above with highlight arcs, gray curb with beveled
-border. All tiles must feel cohesive, same pixel art style and lighting."
+border. Make sure it feels cute and fun. All tiles must feel cohesive, same pixel art style and lighting."
