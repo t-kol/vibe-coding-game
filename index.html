@@ -413,7 +413,7 @@ const UNO_CAMPUS_BUILDINGS = [
   { name: 'Milo Bail Student Center',   cx: 78,  cy: 13 },
   { name: 'Durham Science Center',      cx: 102, cy: 13 },
   { name: 'Engineering Hall',           cx: 119, cy: 14 },
-  { name: 'H&K / Wellness Center',      cx: 67,  cy: 57 },
+  { name: 'H&K / Wellness Center',      cx: 67,  cy: 48 },
   { name: 'Caniglia Field',             cx: 100, cy: 52 },
   { name: 'Pep Bowl / REC Center',      cx: 115, cy: 45 },
   { name: 'Mammel Hall',                cx: 127, cy: 41 },
@@ -1604,11 +1604,8 @@ function updateNearbyBuilding() {
   STATE.nearThompson = (CURRENT_MAP_NAME === 'UNO Campus') &&
                        (tdx * tdx + tdy * tdy < THOMPSON_R * THOMPSON_R);
 
-  // H&K / Wellness Center proximity — enables E-key climb game nav
-  const HK_CX = 67, HK_CY = 57, HK_R = 7;
-  const hdx = carTX - HK_CX, hdy = carTY - HK_CY;
-  STATE.nearHK = (CURRENT_MAP_NAME === 'UNO Campus') &&
-                 (hdx * hdx + hdy * hdy < HK_R * HK_R);
+  // H&K / Wellness Center — only show [E] prompt when the building label is visible
+  STATE.nearHK = STATE.nearbyBuilding === 'H&K / Wellness Center';
 }
 
 // ============================================================
@@ -1654,14 +1651,14 @@ function drawStartScreen() {
 }
 
 function drawHelpModal() {
-  const PW = Math.min(560, canvas.width  - 48);
-  const PH = Math.min(480, canvas.height - 48);
-  const PX = (canvas.width  - PW) / 2;
-  const PY = (canvas.height - PH) / 2;
-  const PAD = 24;
+  const PW  = Math.min(700, canvas.width  - 40);
+  const PH  = Math.min(540, canvas.height - 40);
+  const PX  = (canvas.width  - PW) / 2;
+  const PY  = (canvas.height - PH) / 2;
+  const PAD = 28;
 
   // dim backdrop
-  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillStyle = 'rgba(0,0,0,0.78)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // panel
@@ -1674,88 +1671,113 @@ function drawHelpModal() {
   ctx.save();
   ctx.textBaseline = 'top';
 
-  // title
+  // ── Title ────────────────────────────────────────────────
   ctx.fillStyle = '#FFDD00';
-  ctx.font = 'bold 20px monospace';
+  ctx.font = 'bold 22px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('ELMWOOD DRIFT', PX + PW / 2, PY + PAD);
 
   ctx.textAlign = 'left';
-  let cy = PY + PAD + 32;
-  const col1 = PX + PAD;
-  const col2 = PX + PW / 2 + 8;
-  const lineH = 22;
 
-  function heading(text, x, y) {
-    ctx.fillStyle = '#888888';
-    ctx.font = 'bold 11px monospace';
+  // Column split: left half = controls, right half = scoring
+  const col1     = PX + PAD;
+  const col2     = PX + Math.floor(PW / 2) + 10;
+  const KEY_W    = 80;   // fixed width reserved for key label
+  const ROW_H    = 24;   // line height for control rows
+  const SEC_GAP  = 10;   // gap between heading and first row
+  const LABEL_H  = 14;   // monospace heading font size
+
+  function sectionHeading(text, x, y) {
+    ctx.fillStyle = '#666666';
+    ctx.font = `bold ${LABEL_H}px monospace`;
     ctx.fillText(text.toUpperCase(), x, y);
   }
-  function row(label, value, x, y) {
+
+  function ctrlRow(key, desc, x, y) {
     ctx.fillStyle = '#FFDD00';
     ctx.font = 'bold 13px monospace';
-    ctx.fillText(label, x, y);
+    ctx.fillText(key, x, y);
     ctx.fillStyle = '#cccccc';
     ctx.font = '13px monospace';
-    ctx.fillText(value, x + 110, y);
+    ctx.fillText(desc, x + KEY_W, y);
   }
 
-  // ── Controls (left column) ──────────────────────────────
-  heading('Controls', col1, cy);
-  cy += lineH - 4;
-  row('W / ↑',     'Accelerate',    col1, cy); cy += lineH;
-  row('S / ↓',     'Brake / Reverse', col1, cy); cy += lineH;
-  row('A / ←',     'Steer left',    col1, cy); cy += lineH;
-  row('D / →',     'Steer right',   col1, cy); cy += lineH;
-  row('SPACE',      'Handbrake',     col1, cy); cy += lineH;
-  row('M',          'Switch map',    col1, cy); cy += lineH;
-  row('P',          'Mini-Golf',     col1, cy); cy += lineH;
-  row('H',          'Toggle help',   col1, cy);
+  // ── Controls (left column) ───────────────────────────────
+  let cy = PY + PAD + 36;
+  sectionHeading('Controls', col1, cy);
+  cy += SEC_GAP + LABEL_H;
 
-  // ── Scoring (right column, aligned to top) ──────────────
-  let cy2 = PY + PAD + 32;
-  heading('Scoring', col2, cy2);
-  cy2 += lineH - 4;
+  const controls = [
+    ['W / ↑',   'Accelerate'],
+    ['S / ↓',   'Brake / Reverse'],
+    ['A / ←',   'Steer left'],
+    ['D / →',   'Steer right'],
+    ['SPACE',   'Handbrake'],
+    ['M',       'Switch map'],
+    ['H',       'Toggle help'],
+  ];
+  for (const [key, desc] of controls) {
+    ctrlRow(key, desc, col1, cy);
+    cy += ROW_H;
+  }
 
+  // ── Scoring (right column) ───────────────────────────────
+  let cy2 = PY + PAD + 36;
+  sectionHeading('Scoring', col2, cy2);
+  cy2 += SEC_GAP + LABEL_H;
+
+  const NOTE_LINE_H = 17;
   const notes = [
-    ['Drift',    'Slide your rear wheels to\nearn points every frame.'],
-    ['Angle',    'Bigger slip angle = faster\npoint gain.'],
-    ['Combo',    'Chain drifts within 90\nframes for a multiplier\n(up to x8).'],
-    ['Speed',    'You must be moving forward\nwhile drifting to score.'],
+    ['Drift',  ['Slide your rear wheels to earn', 'points every frame.']],
+    ['Angle',  ['Bigger slip angle = faster point gain.']],
+    ['Combo',  ['Chain drifts within 90 frames', 'for a multiplier (up to x8).']],
+    ['Speed',  ['Must be moving forward while', 'drifting to score.']],
   ];
 
-  ctx.font = 'bold 13px monospace';
-  for (const [label, note] of notes) {
+  for (const [label, lines] of notes) {
     ctx.fillStyle = '#FFDD00';
+    ctx.font = 'bold 13px monospace';
     ctx.fillText(label, col2, cy2);
+    cy2 += NOTE_LINE_H;
     ctx.fillStyle = '#aaaaaa';
     ctx.font = '12px monospace';
-    const lines = note.split('\n');
-    let ly = cy2 + 16;
-    for (const l of lines) { ctx.fillText(l, col2, ly); ly += 16; }
-    cy2 += 16 + lines.length * 16 + 6;
-    ctx.font = 'bold 13px monospace';
+    for (const l of lines) {
+      ctx.fillText(l, col2, cy2);
+      cy2 += NOTE_LINE_H;
+    }
+    cy2 += 6; // gap between scoring entries
   }
 
-  // ── Locations ───────────────────────────────────────────
-  cy += lineH + 8;
-  heading('Locations (UNO Campus)', col1, cy);
-  cy += lineH - 4;
-  ctx.fillStyle = '#aaaaaa';
-  ctx.font = '12px monospace';
-  const locLines = [
-    'Drive near Thompson Alumni Center → press E',
-    '  to launch Maverick Mini Golf.',
-    'Drive near H&K / Wellness Center → press E',
-    '  to launch Maverick Climb.',
-  ];
-  for (const l of locLines) { ctx.fillText(l, col1, cy); cy += 16; }
+  // ── Locations (full width, below both columns) ───────────
+  const locY = Math.max(cy, cy2) + 16;
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(PX + PAD, locY - 4, PW - PAD * 2, 1); // divider line
 
-  // dismiss hint
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  sectionHeading('Locations  (UNO Campus)', col1, locY + 8);
+
+  const LOC_LINE_H = 19;
+  let ly = locY + 8 + SEC_GAP + LABEL_H;
+  ctx.font = '13px monospace';
+
+  const locations = [
+    { label: 'Thompson Alumni Center', action: 'press E  →  Maverick Mini Golf' },
+    { label: 'H&K / Wellness Center',  action: 'press E  →  Maverick Climb'    },
+  ];
+  for (const loc of locations) {
+    ctx.fillStyle = '#FFDD00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('Drive near  ' + loc.label, col1, ly);
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '13px monospace';
+    ctx.fillText(loc.action, col2, ly);
+    ly += LOC_LINE_H;
+  }
+
+  // ── Dismiss hint ─────────────────────────────────────────
+  ctx.fillStyle = 'rgba(255,255,255,0.30)';
   ctx.font = '12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('press H or ESC to close', PX + PW / 2, PY + PH - 20);
+  ctx.fillText('press H or ESC to close', PX + PW / 2, PY + PH - 18);
 
   ctx.restore();
 }
