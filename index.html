@@ -420,122 +420,6 @@ const UNO_CAMPUS_BUILDINGS = [
   { name: 'Maverick Village Clubhouse', cx: 27,  cy: 46 },
 ];
 
-// ------------------------------------------------------------------
-// new map: Elmwood Park golf-course loop (200×200)
-function buildElmwoodParkMap() {
-  const W = 200, H = 200;
-  const tiles     = new Array(W * H).fill(T.GRASS);
-  const collision = new Array(W * H).fill(false);
-  const markings  = new Array(W * H).fill(false);
-
-  function idx(x, y) { return y * W + x; }
-  function fillRect(x, y, w, h, tileId) {
-    for (let dy = 0; dy < h; dy++) {
-      for (let dx = 0; dx < w; dx++) {
-        const tx = x + dx, ty = y + dy;
-        if (tx >= 0 && tx < W && ty >= 0 && ty < H) {
-          tiles[idx(tx, ty)] = tileId;
-        }
-      }
-    }
-  }
-
-  // Capsule rasteriser: paints every tile whose centre lies within
-  // (width/2) units of the line segment.  Gap-free on any angle.
-  function drawSegment(x1, y1, x2, y2, tileId, width) {
-    const dx = x2 - x1, dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) return;
-    const half = width / 2;
-    const halfSq = half * half;
-    const minTX = Math.max(0,     Math.floor(Math.min(x1, x2) - half));
-    const maxTX = Math.min(W - 1, Math.ceil (Math.max(x1, x2) + half));
-    const minTY = Math.max(0,     Math.floor(Math.min(y1, y2) - half));
-    const maxTY = Math.min(H - 1, Math.ceil (Math.max(y1, y2) + half));
-    for (let ty = minTY; ty <= maxTY; ty++) {
-      for (let tx = minTX; tx <= maxTX; tx++) {
-        const cx = tx + 0.5 - x1, cy = ty + 0.5 - y1;
-        const t  = Math.max(0, Math.min(1, (cx * dx + cy * dy) / lenSq));
-        const nx = cx - t * dx, ny = cy - t * dy;
-        if (nx * nx + ny * ny <= halfSq) tiles[idx(tx, ty)] = tileId;
-      }
-    }
-  }
-
-  // ── Background ─────────────────────────────────────────
-  // (grass by default)
-
-  // ── Outer loop road around park ─────────────────────────
-  drawSegment(20, 20, 180, 20, T.ASPHALT, 3);
-  drawSegment(180, 20, 180, 180, T.ASPHALT, 3);
-  drawSegment(180, 180, 20, 180, T.ASPHALT, 3);
-  drawSegment(20, 180, 20, 20, T.ASPHALT, 3);
-
-  // ── Inner loop ──────────────────────────────────────────
-  drawSegment(60, 40, 140, 40, T.ASPHALT, 2);
-  drawSegment(140, 40, 140, 140, T.ASPHALT, 2);
-  drawSegment(140, 140, 60, 140, T.ASPHALT, 2);
-  drawSegment(60, 140, 60, 40, T.ASPHALT, 2);
-
-  // ── Dirt connectors ─────────────────────────────────────
-  drawSegment(100, 20, 100, 40, T.DIRT, 1);
-  drawSegment(20, 100, 60, 100, T.DIRT, 1);
-  drawSegment(180, 100, 140, 100, T.DIRT, 1);
-
-  // ── Random trees inside loops ────────────────────────────
-  for (let tx = 30; tx < 170; tx += 15) {
-    for (let ty = 30; ty < 170; ty += 20) {
-      if (Math.random() < 0.2) fillRect(tx, ty, 2, 2, T.TREE);
-    }
-  }
-
-  // ── Pacific St (southern edge) ────────────────────────────
-  drawSegment(0, 190, 200, 190, T.ASPHALT, 3);
-  // occasional center markings
-  for (let mx = 0; mx < 200; mx += 4) {
-    markings[idx(mx, 190)] = true;
-  }
-
-  // parking lots along Pacific St
-  fillRect(10, 185, 30, 10, T.PARKING);
-  fillRect(60, 185, 40, 10, T.PARKING);
-  fillRect(120, 185, 50, 10, T.PARKING);
-
-  // buildings north of Pacific
-  fillRect(15, 170, 10, 10, T.BUILDING);
-  fillRect(70, 170, 12, 12, T.BUILDING);
-  fillRect(130, 170, 8, 16, T.BUILDING);
-
-  // road leading east toward campus start
-  drawSegment(180, 190, 180, 100, T.ASPHALT, 3);
-  fillRect(178, 188, 4, 4, T.INTERSECTION);
-
-  // small campus-like cluster near east edge
-  fillRect(170, 90, 10, 10, T.BUILDING);
-  fillRect(160, 110, 8, 8, T.BUILDING);
-  fillRect(180, 120, 12, 6, T.BUILDING);
-
-  // short north-south connector branch off Pacific
-  drawSegment(150, 190, 150, 160, T.ASPHALT, 2);
-
-  // ── Void border ─────────────────────────────────────────
-  for (let x = 0; x < W; x++) {
-    tiles[idx(x, 0)] = T.VOID;
-    tiles[idx(x, H - 1)] = T.VOID;
-  }
-  for (let y = 0; y < H; y++) {
-    tiles[idx(0, y)] = T.VOID;
-    tiles[idx(W - 1, y)] = T.VOID;
-  }
-
-  // ── Build collisions ────────────────────────────────────
-  for (let i = 0; i < W * H; i++) {
-    collision[i] = TILE_COLLIDABLE[tiles[i]] === true;
-  }
-
-  return { tiles, collision, markings, width: W, height: H };
-}
-
 
 // ── Tileset (procedural, offscreen canvas) ──────────────────────────────────
 let tilesetCanvas = null;
@@ -1665,8 +1549,8 @@ function drawStartScreen() {
 }
 
 function drawHelpModal() {
-  const PW = Math.min(560, canvas.width  - 48);
-  const PH = Math.min(480, canvas.height - 48);
+  const PW = Math.min(700, canvas.width  - 48);
+  const PH = Math.min(580, canvas.height - 48);
   const PX = (canvas.width  - PW) / 2;
   const PY = (canvas.height - PH) / 2;
   const PAD = 24;
@@ -1695,7 +1579,7 @@ function drawHelpModal() {
   let cy = PY + PAD + 32;
   const col1 = PX + PAD;
   const col2 = PX + PW / 2 + 8;
-  const lineH = 22;
+  const lineH = 24;
 
   function heading(text, x, y) {
     ctx.fillStyle = '#888888';
@@ -1806,15 +1690,9 @@ function switchMap() {
   document.title = `Elmwood Drift — ${CURRENT_MAP_NAME}`;
 
   // reset car in a sensible location for the new map
-  if (info.name === 'Elmwood Park') {
-    // place at Pacific St on the western side
-    car.x = (10 + 0.5) * TILE_SIZE;
-    car.y = (190 + 0.5) * TILE_SIZE;
-  } else {
-    // UNO Campus — spawn on top road near west side, heading east
-    car.x = (12 + 0.5) * TILE_SIZE;
-    car.y = (5  + 0.5) * TILE_SIZE;
-  }
+  // UNO Campus — spawn on top road near west side, heading east
+  car.x = (12 + 0.5) * TILE_SIZE;
+  car.y = (5  + 0.5) * TILE_SIZE;
   car.heading = 0;
   STATE.score = 0;
   STATE.combo = 1;
@@ -1839,8 +1717,7 @@ function init() {
 
   // prepare map builders list
   MAP_BUILDERS = [
-    { name: 'UNO Campus',   build: buildUNOCampusMap   },
-    { name: 'Elmwood Park', build: buildElmwoodParkMap },
+    { name: 'UNO Campus', build: buildUNOCampusMap },
   ];
   mapIndex = 0;
   CURRENT_MAP_NAME = MAP_BUILDERS[0].name;
@@ -1869,11 +1746,8 @@ function init() {
 
   resetSoccerBall();
 
-  // allow toggling maps with 'M', and mini-golf nav with 'E'
+  // mini-golf nav with 'E'
   window.addEventListener('keydown', e => {
-    if (e.key === 'm' || e.key === 'M') {
-      switchMap();
-    }
     if (e.key === 'e' || e.key === 'E') {
       if (STATE.nearThompson) {
         sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
