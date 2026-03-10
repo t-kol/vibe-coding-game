@@ -75,6 +75,8 @@ const STATE = {
   frame:       0,
   nearbyBuilding:      null,
   nearbyBuildingAlpha: 0,
+  nearThompson:        false,
+  nearHK:              false,
 };
 
 // ============================================================
@@ -732,7 +734,7 @@ window.addEventListener('keydown', e => {
     case 'Space':                   INPUT.handbrake = true;
       e.preventDefault(); break;
     case 'KeyP':
-      window.location.href = 'Maverick-Mini-Golf/index.html'; break;
+      window.location.href = 'Maverick-Mini-Golf/dist/index.html'; break;
   }
 });
 
@@ -1185,6 +1187,42 @@ function drawHUD() {
     ctx.globalAlpha = 1;
   }
 
+  // ── Thompson Alumni Center — mini-golf prompt ──────────────────
+  if (STATE.nearThompson) {
+    const promptText = '[E]  Maverick Mini Golf';
+    ctx.font = 'bold 15px monospace';
+    const pw = ctx.measureText(promptText).width;
+    const px2 = canvas.width / 2;
+    const py2 = canvas.height - 80;
+    ctx.fillStyle = 'rgba(0,0,20,0.85)';
+    ctx.fillRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.strokeStyle = '#FFDD00';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.fillStyle = '#FFDD00';
+    ctx.textAlign = 'center';
+    ctx.fillText(promptText, px2, py2);
+    ctx.textAlign = 'left';
+  }
+
+  // ── H&K / Wellness Center — climb game prompt ─────────────────
+  if (STATE.nearHK) {
+    const promptText = '[E]  Maverick Climb';
+    ctx.font = 'bold 15px monospace';
+    const pw = ctx.measureText(promptText).width;
+    const px2 = canvas.width / 2;
+    const py2 = canvas.height - 80;
+    ctx.fillStyle = 'rgba(0,0,20,0.85)';
+    ctx.fillRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.strokeStyle = '#FFDD00';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.fillStyle = '#FFDD00';
+    ctx.textAlign = 'center';
+    ctx.fillText(promptText, px2, py2);
+    ctx.textAlign = 'left';
+  }
+
   // ── Controls hint (bottom) ─────────────────────────────────────
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
@@ -1222,6 +1260,18 @@ function updateNearbyBuilding() {
     STATE.nearbyBuildingAlpha = Math.max(0, STATE.nearbyBuildingAlpha - 0.06);
     if (STATE.nearbyBuildingAlpha <= 0) STATE.nearbyBuilding = null;
   }
+
+  // Thompson Alumni Center proximity — enables E-key mini-golf nav
+  const THOMPSON_CX = 38, THOMPSON_CY = 13, THOMPSON_R = 7;
+  const tdx = carTX - THOMPSON_CX, tdy = carTY - THOMPSON_CY;
+  STATE.nearThompson = (CURRENT_MAP_NAME === 'UNO Campus') &&
+                       (tdx * tdx + tdy * tdy < THOMPSON_R * THOMPSON_R);
+
+  // H&K / Wellness Center proximity — enables E-key climb game nav
+  const HK_CX = 67, HK_CY = 57, HK_R = 7;
+  const hdx = carTX - HK_CX, hdy = carTY - HK_CY;
+  STATE.nearHK = (CURRENT_MAP_NAME === 'UNO Campus') &&
+                 (hdx * hdx + hdy * hdy < HK_R * HK_R);
 }
 
 // ============================================================
@@ -1299,10 +1349,14 @@ function init() {
   camera.x = car.x;
   camera.y = car.y;
 
-  // allow toggling maps with 'M'
+  // allow toggling maps with 'M', and mini-golf nav with 'E'
   window.addEventListener('keydown', e => {
     if (e.key === 'm' || e.key === 'M') {
       switchMap();
+    }
+    if (e.key === 'e' || e.key === 'E') {
+      if (STATE.nearThompson) window.location.href = 'Maverick-Mini-Golf/dist/index.html';
+      else if (STATE.nearHK)  window.location.href = 'maverick_climb/index.html';
     }
   });
 
