@@ -147,9 +147,9 @@ function buildUNOCampusMap() {
     fillRect(x, y - 1, len, 1, T.SIDEWALK);
     fillRect(x, y + roadWidth, len, 1, T.SIDEWALK);
     fillRect(x, y, len, roadWidth, T.ASPHALT);
-    if (roadWidth >= 3) {
+    if (roadWidth >= 2) {
       const cy = y + Math.floor(roadWidth / 2);
-      for (let mx = x; mx < x + len; mx++) markings[idx(mx, cy)] = true;
+      for (let mx = x; mx < x + len; mx++) markings[idx(mx, cy)] |= 1; // bit 1 = H dash
     }
   }
 
@@ -157,6 +157,10 @@ function buildUNOCampusMap() {
     fillRect(x - 1, y, 1, len, T.SIDEWALK);
     fillRect(x + roadWidth, y, 1, len, T.SIDEWALK);
     fillRect(x, y, roadWidth, len, T.ASPHALT);
+    if (roadWidth >= 2) {
+      const cx = x + Math.floor(roadWidth / 2);
+      for (let my = y; my < y + len; my++) markings[idx(cx, my)] |= 2; // bit 2 = V dash
+    }
   }
 
   // Capsule rasteriser: paints every tile whose centre lies within
@@ -203,16 +207,19 @@ function buildUNOCampusMap() {
   fillRect(20, 26, 17, 13, T.PARKING); // middle-left parking
   fillRect(20, 44, 17, 11, T.PARKING); // lower-left parking (below upper H-road)
 
+  // H&K inner-L parking lot — fills the open corner between the two building arms
+  fillRect(73, 44, 20, 18, T.PARKING); // x=73–92, y=44–61
+
   // ── Roads (blue circuit highlights) ──────────────────────────────────────
 
-  // Top road: Dodge St / S University Dr Rd N — full width east–west
-  drawHRoad(0, 3, W, 4);
+  // Top road: Dodge St / S University Dr Rd N — full width east–west (width 3 = odd, center at y=4)
+  drawHRoad(0, 3, W, 3);
 
-  // Left road: S 67th Ave — north–south (x=12 matches satellite)
-  drawVRoad(12, 6, 44, 4);
+  // Left road: S 67th Ave — north–south (width 3 = odd, center at x=13)
+  drawVRoad(12, 6, 44, 3);
 
   // Left road curves south through Maverick Village
-  drawSegment(14, 50, 18, 62, T.ASPHALT, 4);
+  drawSegment(13, 50, 18, 62, T.ASPHALT, 3);
   drawSegment(18, 62, 24, 72, T.ASPHALT, 4);
 
   // University Dr S — southwest leg curving toward Elmwood Park
@@ -220,12 +227,12 @@ function buildUNOCampusMap() {
   drawSegment(40, 84, 58, 91, T.ASPHALT, 4);
   drawSegment(58, 91, 76, 95, T.ASPHALT, 4);
 
-  // Right road: University Dr E — north–south along eastern edge (6 tiles wide)
-  drawVRoad(127, 6, 62, 6);
+  // Right road: University Dr E — north–south along eastern edge (width 5 = odd, center at x=129)
+  drawVRoad(127, 6, 62, 5);
 
   // University Dr E curves southeast into Elmwood Park
   // Curve stays east of Caniglia Field (x≥122 until y=82)
-  drawSegment(130, 68, 125, 82, T.ASPHALT, 6);
+  drawSegment(129, 68, 125, 82, T.ASPHALT, 5);
   drawSegment(125, 82, 107, 91, T.ASPHALT, 6);
   drawSegment(107, 91, 76, 95, T.ASPHALT, 6);
 
@@ -251,7 +258,7 @@ function buildUNOCampusMap() {
   fillRect(61,  8,  9, 11, T.BUILDING); // Criss Library  (x=61–69)
   fillRect(72,  8, 12, 11, T.BUILDING); // Milo Bail Student Center  (x=72–83)
   fillRect(96,  8, 13, 11, T.BUILDING); // Durham Science Center  (x=96–108)
-  fillRect(122, 8, 12, 13, T.BUILDING); // Engineering Hall  (x=122–133)
+  fillRect(113, 8, 12, 13, T.BUILDING); // Engineering Hall  (x=113–124, clear of right road sidewalk at x=126)
 
   // H&K / Wellness Center — L-shaped, clear of all roads
   // Starts at x=61 (1 tile past vertical road sidewalk at x=60), y=44 (1 tile past upper H-road sidewalk at y=43)
@@ -262,8 +269,8 @@ function buildUNOCampusMap() {
   // Left as open GRASS (no collidable tiles); labels still trigger by proximity
 
   // East campus — 2 buildings right of soccer field (~x=96–104)
-  fillRect(109, 35, 13, 20, T.BUILDING); // east building A  (x=109–121)
-  fillRect(122, 31, 11, 20, T.BUILDING); // east building B  (x=122–132)
+  fillRect(109, 44, 13, 14, T.BUILDING); // east building A  (x=109–121, y=44–57, south of H-road)
+  fillRect(110, 60, 13, 12, T.BUILDING); // east building B  (x=110–122, y=60–71, clear of right road)
 
   // Maverick Village Clubhouse — west campus
   fillRect(23, 44, 8, 5, T.BUILDING);
@@ -283,7 +290,18 @@ function buildUNOCampusMap() {
     collision[i] = TILE_COLLIDABLE[tiles[i]] === true;
   }
 
-  return { tiles, collision, markings, width: W, height: H };
+  // Parking lot areas (world pixels) — used by drawParkingLotStalls()
+  const TS = TILE_SIZE;
+  const parkingLots = [
+    // upper-left parking split by left road (x=12–14) + sidewalks (x=11,15)
+    { x:  5*TS, y:  7*TS, w:  6*TS, h: 16*TS },  // upper-left west half  (tiles x=5–10)
+    { x: 16*TS, y:  7*TS, w: 11*TS, h: 16*TS },  // upper-left east half  (tiles x=16–26)
+    { x: 20*TS, y: 26*TS, w: 17*TS, h: 13*TS },  // middle-left
+    { x: 20*TS, y: 44*TS, w: 17*TS, h: 11*TS },  // lower-left
+    { x: 73*TS, y: 44*TS, w: 20*TS, h: 18*TS },  // H&K inner-L
+  ];
+
+  return { tiles, collision, markings, width: W, height: H, parkingLots };
 }
 
 // Building proximity labels for UNO Campus (tile-space centres)
@@ -293,7 +311,7 @@ const UNO_CAMPUS_BUILDINGS = [
   { name: 'Criss Library',              cx: 65,  cy: 13 },
   { name: 'Milo Bail Student Center',   cx: 78,  cy: 13 },
   { name: 'Durham Science Center',      cx: 102, cy: 13 },
-  { name: 'Engineering Hall',           cx: 128, cy: 14 },
+  { name: 'Engineering Hall',           cx: 119, cy: 14 },
   { name: 'H&K / Wellness Center',      cx: 67,  cy: 57 },
   { name: 'Caniglia Field',             cx: 100, cy: 52 },
   { name: 'Pep Bowl / REC Center',      cx: 115, cy: 45 },
@@ -420,6 +438,7 @@ function buildElmwoodParkMap() {
 
 // ── Tileset (procedural, offscreen canvas) ──────────────────────────────────
 let tilesetCanvas = null;
+let tilesetImage  = null;
 
 const TILEMAP = {
   0:  { sx: 0,   sy: 0   },  // VOID
@@ -450,23 +469,92 @@ function buildFallbackTileset() {
   const fb = document.createElement('canvas');
   fb.width = 256; fb.height = 256;
   const c = fb.getContext('2d');
-  const S = TILE_SIZE;
-  const tiles = [
-    [0,   0,   '#0A0A0A'],
-    [64,  0,   '#2C2C38'],
-    [128, 0,   '#C4B48C'],
-    [192, 0,   '#2E6A20'],
-    [0,   64,  '#184A10'],
-    [64,  64,  '#323244'],
-    [128, 64,  '#7A5A18'],
-    [192, 64,  '#383848'],
-    [0,   128, '#5A4A3C'],
-    [64,  128, '#909080'],
+  const S = TILE_SIZE; // 64
+
+  // ── Flat base tiles ─────────────────────────────────────────────
+  const flatTiles = [
+    [0,   0,   '#0A0A0A'],  // VOID
+    [64,  0,   '#2C2C38'],  // ASPHALT
+    [128, 0,   '#C4B48C'],  // SIDEWALK
+    [192, 0,   '#2E6A20'],  // GRASS
+    [64,  64,  '#323244'],  // INTERSECTION
+    [128, 64,  '#7A5A18'],  // DIRT
+    [192, 64,  '#383848'],  // PARKING
+    [64,  128, '#909080'],  // CURB
   ];
-  for (const [x, y, color] of tiles) {
+  for (const [x, y, color] of flatTiles) {
     c.fillStyle = color;
     c.fillRect(x, y, S, S);
   }
+
+  // ── GRASS — subtle variation ────────────────────────────────────
+  c.fillStyle = '#2E6A20';
+  c.fillRect(192, 0, S, S);
+  c.fillStyle = '#266018';
+  for (let i = 0; i < 12; i++) {
+    const gx = 192 + (i * 17) % S;
+    const gy = 0   + (i * 11) % S;
+    c.fillRect(gx, gy, 3, 5);
+  }
+
+  // ── TREE tile ───────────────────────────────────────────────────
+  c.fillStyle = '#1A3A10';
+  c.fillRect(0, 64, S, S);
+  // Canopy
+  c.fillStyle = '#225A14';
+  c.beginPath();
+  c.arc(0 + 32, 64 + 30, 22, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#2A7018';
+  c.beginPath();
+  c.arc(0 + 28, 64 + 26, 14, 0, Math.PI * 2);
+  c.fill();
+  // Trunk
+  c.fillStyle = '#5A3A18';
+  c.fillRect(0 + 29, 64 + 46, 6, 14);
+
+  // ── PARKING tile — flat base only; stall lines are drawn as a world-space overlay ──
+  c.fillStyle = '#26263A';
+  c.fillRect(192, 64, S, S);
+
+  // ── BUILDING tile ───────────────────────────────────────────────
+  const bx = 0, by = 128;
+  // Wall
+  c.fillStyle = '#6A5C50';
+  c.fillRect(bx, by, S, S);
+  // Brick pattern
+  c.fillStyle = '#5A4C40';
+  for (let row = 0; row < 8; row++) {
+    const offset = (row % 2) * 8;
+    for (let col = 0; col < 5; col++) {
+      c.fillRect(bx + offset + col * 16, by + row * 8, 14, 7);
+    }
+  }
+  // Roof edge (dark top stripe)
+  c.fillStyle = '#3A2E26';
+  c.fillRect(bx, by, S, 5);
+  // Windows — 3 columns × 3 rows
+  const winColors = ['#8AAAC8', '#6A8AAA', '#AACCEE'];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      const wx = bx + 7 + col * 18;
+      const wy = by + 10 + row * 17;
+      // Window frame
+      c.fillStyle = '#3A3028';
+      c.fillRect(wx - 1, wy - 1, 12, 10);
+      // Window glass
+      c.fillStyle = winColors[(row + col) % winColors.length];
+      c.fillRect(wx, wy, 10, 8);
+      // Window reflection glint
+      c.fillStyle = 'rgba(255,255,255,0.4)';
+      c.fillRect(wx + 1, wy + 1, 3, 2);
+    }
+  }
+  // Side shadow
+  c.fillStyle = 'rgba(0,0,0,0.18)';
+  c.fillRect(bx + S - 5, by, 5, S);
+  c.fillRect(bx, by + S - 5, S, 5);
+
   return fb;
 }
 
@@ -778,14 +866,22 @@ function drawRoadMarkings() {
   for (let ty = startTY; ty <= endTY; ty++) {
     for (let tx = startTX; tx <= endTX; tx++) {
       if (tx < 0 || tx >= MAP.width || ty < 0 || ty >= MAP.height) continue;
-      if (!MAP.markings[ty * MAP.width + tx]) continue;
+      const mark = MAP.markings[ty * MAP.width + tx];
+      if (!mark) continue;
+      if (MAP.tiles[ty * MAP.width + tx] === T.VOID) continue;
+      if ((mark & 3) === 3) continue; // both H and V bits set = intersection, skip
 
       const screenX = tx * TILE_SIZE - camera.x + halfW;
       const screenY = ty * TILE_SIZE - camera.y + halfH;
+      const half = TILE_SIZE / 2;
 
-      // Dashed center line — two rectangles with a gap
-      ctx.fillRect(screenX + 28, screenY + 4,  4, 24);
-      ctx.fillRect(screenX + 28, screenY + 36, 4, 24);
+      if (mark & 2) {
+        // Vertical road — dash runs top-to-bottom, 8px gap at each tile edge
+        ctx.fillRect(screenX + half - 2, screenY + 8, 4, 48);
+      } else {
+        // Horizontal road (bit 1 or legacy true) — dash runs left-to-right
+        ctx.fillRect(screenX + 8, screenY + half - 2, 48, 4);
+      }
     }
   }
 }
@@ -833,8 +929,8 @@ function updateTireMarks() {
 // ── Car sprite ──────────────────────────────────────────────
 // Drawn on a 12×20 virtual grid scaled to 36×60px, centered at origin
 const CAR_PALETTE_NORMAL = {
-  body:   '#2244CC',
-  window: '#88AAFF',
+  body:   '#CC2222',
+  window: '#FF8888',
   wheel:  '#111111',
   trim:   '#FFFFFF',
   light:  '#FF4444',
@@ -896,6 +992,66 @@ function drawCar() {
   ctx.restore();
 }
 
+function drawParkingLotStalls() {
+  if (!MAP || !MAP.parkingLots || !MAP.parkingLots.length) return;
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+
+  // Stall dimensions (world pixels)
+  const STALL_W = TILE_SIZE;       // 64px — stall width  (car is 36px, fits)
+  const STALL_D = TILE_SIZE * 1.5; // 96px — stall depth  (car is 60px, fits)
+  const LANE_W  = TILE_SIZE;       // 64px — driving lane between opposing rows
+  const T       = 2;               // line thickness
+
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+
+  for (const lot of MAP.parkingLots) {
+    const lx = Math.round(lot.x - camera.x + halfW);
+    const ly = Math.round(lot.y - camera.y + halfH);
+    const lw = lot.w;
+    const lh = lot.h;
+
+    // Skip lots entirely off-screen
+    if (lx + lw < 0 || lx > canvas.width || ly + lh < 0 || ly > canvas.height) continue;
+
+    // Clip to this lot's bounds so lines never spill outside
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(lx, ly, lw, lh);
+    ctx.clip();
+
+    // Each row-group = top stalls (back at top, open at bottom) + lane + bottom stalls (back at bottom, open at top)
+    let ry = 0;
+    while (ry < lh) {
+      const topBackY = Math.round(ly + ry);
+      const laneY    = Math.round(ly + ry + STALL_D);
+
+      // ── Top stall row: back line + dividers pointing down (open toward lane) ──
+      ctx.fillRect(lx, topBackY, lw, T);                        // back line
+      for (let sx = 0; sx <= lw; sx += STALL_W)
+        ctx.fillRect(lx + sx - 1, topBackY, T, Math.round(STALL_D)); // dividers
+
+      if (ry + STALL_D >= lh) break;
+
+      // ── Bottom stall row: back line + dividers pointing up (open toward lane) ──
+      if (ry + STALL_D + LANE_W < lh) {
+        const actualBotD = Math.min(Math.round(STALL_D), lh - ry - Math.round(STALL_D) - Math.round(LANE_W));
+        if (actualBotD > 0) {
+          const botStartY = Math.round(laneY + LANE_W);
+          ctx.fillRect(lx, botStartY + actualBotD - T, lw, T);   // back line at bottom
+          for (let sx = 0; sx <= lw; sx += STALL_W)
+            ctx.fillRect(lx + sx - 1, botStartY, T, actualBotD); // dividers
+        }
+      }
+
+      ry += STALL_D * 2 + LANE_W;
+      if (ry >= lh) break;
+    }
+
+    ctx.restore();
+  }
+}
+
 function render() {
   ctx.fillStyle = '#0A0A0A';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -907,7 +1063,10 @@ function render() {
   // 1. Ground / tile grid
   drawTileGrid();
 
-  // 2. Tire marks (persistent)
+  // 2. Parking lot stall lines (world-space overlay)
+  drawParkingLotStalls();
+
+  // 3. Tire marks (persistent)
   drawTireMarks();
 
   // 3. Road markings
@@ -1120,9 +1279,6 @@ function init() {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
-  // build tileset
-  buildTileset();
-
   // prepare map builders list
   MAP_BUILDERS = [
     { name: 'UNO Campus',   build: buildUNOCampusMap   },
@@ -1149,7 +1305,10 @@ function init() {
     }
   });
 
-  requestAnimationFrame(gameLoop);
+  // load tileset then start game loop
+  loadTileset(() => {
+    requestAnimationFrame(gameLoop);
+  });
 }
 
 init();

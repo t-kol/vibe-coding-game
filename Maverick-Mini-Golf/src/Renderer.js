@@ -10,34 +10,42 @@ export class Renderer {
     this.canvas = canvasEl;
     this.ctx    = canvasEl.getContext('2d');
     this._scale = CANVAS.SCALE;
-    this._setupCanvas();
     this._setupResizeHandler();
   }
 
-  _setupCanvas() {
-    this.canvas.width  = CANVAS.WIDTH;
-    this.canvas.height = CANVAS.HEIGHT;
-    // Scale for display
-    this.canvas.style.width  = `${CANVAS.WIDTH  * CANVAS.SCALE}px`;
-    this.canvas.style.height = `${CANVAS.HEIGHT * CANVAS.SCALE}px`;
-    // Crisp pixel rendering
-    this.ctx.imageSmoothingEnabled = false;
-  }
-
   _setupResizeHandler() {
-    // Fit canvas to window while maintaining aspect ratio.
-    // Updates canvas CSS dimensions on every window resize.
     const fit = () => {
-      const aspect = CANVAS.WIDTH / CANVAS.HEIGHT;
-      const winW   = window.innerWidth;
-      const winH   = window.innerHeight;
-      let w = winW, h = winW / aspect;
-      if (h > winH) { h = winH; w = winH * aspect; }
-      this.canvas.style.width  = `${Math.floor(w)}px`;
-      this.canvas.style.height = `${Math.floor(h)}px`;
-      this._scale = w / CANVAS.WIDTH;
+      const dpr = window.devicePixelRatio || 1;
+
+      // Largest integer CSS scale that fits the window (no fractional blurring)
+      const cssScaleW = Math.floor(window.innerWidth  / CANVAS.WIDTH);
+      const cssScaleH = Math.floor(window.innerHeight / CANVAS.HEIGHT);
+      const cssScale  = Math.max(1, Math.min(cssScaleW, cssScaleH));
+
+      const cssW = CANVAS.WIDTH  * cssScale;
+      const cssH = CANVAS.HEIGHT * cssScale;
+      this.canvas.style.width  = `${cssW}px`;
+      this.canvas.style.height = `${cssH}px`;
+
+      // Physical buffer matches actual screen pixels for Retina sharpness
+      const physW = Math.round(cssW * dpr);
+      const physH = Math.round(cssH * dpr);
+      if (this.canvas.width !== physW || this.canvas.height !== physH) {
+        this.canvas.width  = physW;
+        this.canvas.height = physH;
+      }
+
+      // Absolute transform: game coords (320×180) → physical pixels (non-cumulative)
+      this.ctx.setTransform(physW / CANVAS.WIDTH, 0, 0, physH / CANVAS.HEIGHT, 0, 0);
+      this.ctx.imageSmoothingEnabled = false;
+
+      // For mouse input: CSS pixels → game pixels
+      this._scale = cssScale;
     };
+
     window.addEventListener('resize', fit);
+    window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+          .addEventListener('change', fit);
     fit();
   }
 

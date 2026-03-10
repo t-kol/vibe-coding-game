@@ -117,36 +117,20 @@ export default {
     map: [
       '################################',  // row  0  32×#
       '################################',  // row  1  32×#
-      '#IIIIIIIIIIIII.#################',  // row  2  1#+13I+1.+17# = 1+13+1+17=32 ✓
-      '#IIIIIIIIIIIII.#################',  // row  3  same=32  [tee col2='I' → need '.' at col2!]
-      // row 3 col 2 must be '.'. Let me fix:
-      // '#.IIIIIIIIIII..#################' = 1+1.+11I+2.+17# = 1+1+11+2+17=32 ✓
-      // idx2 = '.' ✓
-      '#.IIIIIIIIIII..#################',  // row  3  1+1.+11I+2.+17# = 32 ✓ [tee col2='.']
-      '#..............RRRR#############',  // row  4  32 ✓
-      '#..............RRRR#############',  // row  5  32 ✓
-      '################IIII############',  // row  6  16#+4I+12# = 32 ✓ (connector → ICE)
-      '################II~B############',  // row  7  16#+2I+1~+1B+12# = 32 ✓
-      '################II~B############',  // row  8  same=32
-      '################II~B############',  // row  9  same=32
-      '################IIII############',  // row 10  same=32 (connector ICE)
-      '################RRRR############',  // row 11  32 ✓
-      '###############IIIIIIIIIIIIIIII#',  // row 12  15#+14I+1.+1# = 15+14+1+1=31 BAD
-      // fix: '###############IIIIIIIIIIIIIII.#' = 15#+14I+1.+1# nope still 31.
-      // '###############IIIIIIIIIIIIIIII#' = 15+16I+1# = 32 ✓ but cup needs '.' at col30
-      // col30 = idx30, in this string: idx0-14=15#, idx15-30=16I, idx31=# → idx30='I' (ICE). OK for blizzard.
-      // But the cup needs to be at a GRASS tile to be reachable. ICE is playable (ball can move on it).
-      // Actually ICE is passable, so the cup CAN be on ICE — the ball will slide into the cup.
-      // So: '###############IIIIIIIIIIIIIIII#' is fine for blizzard (cup on ICE is interesting!)
-      // Actually wait — cup pixel (300,150) → col30 row15. In row 15 it must still be reachable.
-      // ICE is tile type 4 (playable surface), so cup on ICE is valid.
-      // Let me keep row 12 blizzard = row 12 normal (GRASS bottom section):
-      '###############................#',  // row 12  15#+16.+1# = 32 ✓
-      '###############IIIIIIIIIIII....#',  // row 13  15#+11I+4.+1# = 15+11+4+1=31 BAD
-      // '###############IIIIIIIIIIIII...#' = 15+13I+3.+1# = 32 ✓
-      '###############IIIIIIIIIIIII...#',  // row 13  15#+13I+3.+1# = 15+13+3+1=32 ✓
-      '###############IIIIIIIIIIIIIIII#',  // row 14  15#+16I+1# = 32 ✓ (fully icy)
-      '###############IIIIIIIIIIIIIIII#',  // row 15  15#+16I+1# = 32 ✓ [cup col30='I' = playable ICE]
+      '#IIIIIIIIIIIII.#################',  // row  2  ICE across top section
+      '#.IIIIIIIIIII..#################',  // row  3  col2='.' for tee
+      '#..............RRRR#############',  // row  4
+      '#..............RRRR#############',  // row  5
+      '################IIII############',  // row  6  connector → ICE
+      '################II~B############',  // row  7  water+bridge
+      '################II~B############',  // row  8
+      '################II~B############',  // row  9
+      '################IIII############',  // row 10
+      '################RRRR############',  // row 11
+      '###############................#',  // row 12  opens bottom section
+      '###############IIIIIIIIIIIII...#',  // row 13
+      '###############IIIIIIIIIIIIIIII#',  // row 14
+      '###############IIIIIIIIIIIIIIII#',  // row 15  cup col30='I' (ICE = playable)
       '################################',  // row 16  32×#
       '################################',  // row 17  32×#
     ],
