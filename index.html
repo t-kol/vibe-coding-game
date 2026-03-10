@@ -12,6 +12,7 @@
 </head>
 <body>
 <canvas id="game"></canvas>
+<audio id="bgm" src="assets/music/249152__WhiteMcSkeeRemix.mp3" loop></audio>
 <script>
 'use strict';
 
@@ -74,7 +75,108 @@ const STATE = {
   frame:       0,
   nearbyBuilding:      null,
   nearbyBuildingAlpha: 0,
+  nearThompson:        false,
+  nearHK:              false,
+  nearCaniggia:        false,
 };
+
+// ── Donut smoke ──────────────────────────────────────────────────────────────
+// Tracks accumulated yaw while continuously drifting forward.
+// After 3 full circles (6π rad) smoke particles are emitted at the car's world
+// position. Particles fade slowly while drifting, rapidly once drifting stops.
+const THREE_CIRCLES = 2 * Math.PI * 2; // ~12.57 rad
+const smokeState = {
+  driftRotation: 0,   // resets to 0 the moment drifting stops
+  particles:     [],
+};
+const MAX_SMOKE = 120;
+
+function updateSmoke() {
+  const fwd = car.vx * Math.cos(car.heading) + car.vy * Math.sin(car.heading);
+  const activeDrift = car.drifting && fwd > 0;
+
+  if (activeDrift) {
+    smokeState.driftRotation += Math.abs(car.yawRate);
+  } else {
+    smokeState.driftRotation = 0; // must be continuous — reset on any break
+  }
+
+  const triggered = smokeState.driftRotation >= THREE_CIRCLES;
+
+  // Emit particles while triggered + actively drifting
+  if (triggered && activeDrift) {
+    // Emit 3 puffs per frame, offset around car
+    for (let i = 0; i < 3; i++) {
+      const angle  = Math.random() * Math.PI * 2;
+      const spread = 20 + Math.random() * 25;
+      smokeState.particles.push({
+        x:      car.x + Math.cos(angle) * spread,
+        y:      car.y + Math.sin(angle) * spread,
+        radius: 28 + Math.random() * 32,
+        alpha:  0.28 + Math.random() * 0.18,
+        vx:     (Math.random() - 0.5) * 0.4,
+        vy:     (Math.random() - 0.5) * 0.4,
+        active: true,  // will be set false when drifting stops
+      });
+    }
+  }
+
+  // Mark existing particles as no longer fed when drift breaks
+  if (!activeDrift) {
+    for (const p of smokeState.particles) p.active = false;
+  }
+
+  // Age all particles
+  for (let i = smokeState.particles.length - 1; i >= 0; i--) {
+    const p = smokeState.particles[i];
+    p.x      += p.vx;
+    p.y      += p.vy;
+    p.radius += 0.6;
+    p.alpha  -= p.active ? 0.0012 : 0.022; // slow fade while drifting, fast after
+    if (p.alpha <= 0) smokeState.particles.splice(i, 1);
+  }
+}
+
+function drawSmoke() {
+  if (smokeState.particles.length === 0) return;
+
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+
+  ctx.save();
+  for (const p of smokeState.particles) {
+    const sx = p.x - camera.x + halfW;
+    const sy = p.y - camera.y + halfH;
+    if (sx < -p.radius || sx > canvas.width  + p.radius ||
+        sy < -p.radius || sy > canvas.height + p.radius) continue;
+
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, p.radius);
+    g.addColorStop(0,   `rgba(160,160,160,${p.alpha.toFixed(3)})`);
+    g.addColorStop(0.5, `rgba(130,130,130,${(p.alpha * 0.6).toFixed(3)})`);
+    g.addColorStop(1,   `rgba(110,110,110,0)`);
+    ctx.beginPath();
+    ctx.arc(sx, sy, p.radius, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Soccer ball — sits at center of Caniglia Field, can be knocked by the car
+const SOCCER_FIELD = { fx1: 94, fy1: 45, fx2: 108, fy2: 61 }; // tile coords
+const soccerBall = {
+  x:  0, y:  0,   // world pixels — set by resetSoccerBall()
+  vx: 0, vy: 0,
+  radius: 16,
+};
+
+function resetSoccerBall() {
+  const TS = TILE_SIZE;
+  soccerBall.x  = ((SOCCER_FIELD.fx1 + SOCCER_FIELD.fx2) / 2) * TS;
+  soccerBall.y  = ((SOCCER_FIELD.fy1 + SOCCER_FIELD.fy2) / 2) * TS;
+  soccerBall.vx = 0;
+  soccerBall.vy = 0;
+}
 
 // ============================================================
 // [MAP]
@@ -143,23 +245,37 @@ function buildUNOCampusMap() {
     }
   }
 
+  // Like fillRect but won't overwrite existing ASPHALT or INTERSECTION tiles.
+  // Used for sidewalk edges so they don't cut through crossing roads.
+  function fillSidewalk(x, y, w, h) {
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        const tx = x + dx, ty = y + dy;
+        if (tx < 0 || tx >= W || ty < 0 || ty >= H) continue;
+        const id = tiles[idx(tx, ty)];
+        if (id === T.ASPHALT || id === T.INTERSECTION) continue;
+        tiles[idx(tx, ty)] = T.SIDEWALK;
+      }
+    }
+  }
+
   function drawHRoad(x, y, len, roadWidth) {
-    fillRect(x, y - 1, len, 1, T.SIDEWALK);
-    fillRect(x, y + roadWidth, len, 1, T.SIDEWALK);
+    fillSidewalk(x, y - 1, len, 1);
+    fillSidewalk(x, y + roadWidth, len, 1);
     fillRect(x, y, len, roadWidth, T.ASPHALT);
     if (roadWidth >= 2) {
       const cy = y + Math.floor(roadWidth / 2);
-      for (let mx = x; mx < x + len; mx++) markings[idx(mx, cy)] = 1; // 1 = H dash
+      for (let mx = x; mx < x + len; mx++) markings[idx(mx, cy)] |= 1; // bit 1 = H dash
     }
   }
 
   function drawVRoad(x, y, len, roadWidth) {
-    fillRect(x - 1, y, 1, len, T.SIDEWALK);
-    fillRect(x + roadWidth, y, 1, len, T.SIDEWALK);
+    fillSidewalk(x - 1, y, 1, len);
+    fillSidewalk(x + roadWidth, y, 1, len);
     fillRect(x, y, roadWidth, len, T.ASPHALT);
     if (roadWidth >= 2) {
       const cx = x + Math.floor(roadWidth / 2);
-      for (let my = y; my < y + len; my++) markings[idx(cx, my)] = 2; // 2 = V dash
+      for (let my = y; my < y + len; my++) markings[idx(cx, my)] |= 2; // bit 2 = V dash
     }
   }
 
@@ -206,6 +322,9 @@ function buildUNOCampusMap() {
   fillRect(5,  7, 22, 16, T.PARKING);  // upper-left parking
   fillRect(20, 26, 17, 13, T.PARKING); // middle-left parking
   fillRect(20, 44, 17, 11, T.PARKING); // lower-left parking (below upper H-road)
+
+  // H&K inner-L parking lot — fills the open corner between the two building arms
+  fillRect(73, 44, 20, 18, T.PARKING); // x=73–92, y=44–61
 
   // ── Roads (blue circuit highlights) ──────────────────────────────────────
 
@@ -287,7 +406,18 @@ function buildUNOCampusMap() {
     collision[i] = TILE_COLLIDABLE[tiles[i]] === true;
   }
 
-  return { tiles, collision, markings, width: W, height: H };
+  // Parking lot areas (world pixels) — used by drawParkingLotStalls()
+  const TS = TILE_SIZE;
+  const parkingLots = [
+    // upper-left parking split by left road (x=12–14) + sidewalks (x=11,15)
+    { x:  5*TS, y:  7*TS, w:  6*TS, h: 16*TS },  // upper-left west half  (tiles x=5–10)
+    { x: 16*TS, y:  7*TS, w: 11*TS, h: 16*TS },  // upper-left east half  (tiles x=16–26)
+    { x: 20*TS, y: 26*TS, w: 17*TS, h: 13*TS },  // middle-left
+    { x: 20*TS, y: 44*TS, w: 17*TS, h: 11*TS },  // lower-left
+    { x: 73*TS, y: 44*TS, w: 20*TS, h: 18*TS },  // H&K inner-L
+  ];
+
+  return { tiles, collision, markings, width: W, height: H, parkingLots };
 }
 
 // Building proximity labels for UNO Campus (tile-space centres)
@@ -298,128 +428,12 @@ const UNO_CAMPUS_BUILDINGS = [
   { name: 'Milo Bail Student Center',   cx: 78,  cy: 13 },
   { name: 'Durham Science Center',      cx: 102, cy: 13 },
   { name: 'Engineering Hall',           cx: 119, cy: 14 },
-  { name: 'H&K / Wellness Center',      cx: 67,  cy: 57 },
+  { name: 'H&K / Wellness Center',      cx: 67,  cy: 48 },
   { name: 'Caniglia Field',             cx: 100, cy: 52 },
   { name: 'Pep Bowl / REC Center',      cx: 115, cy: 45 },
   { name: 'Mammel Hall',                cx: 127, cy: 41 },
   { name: 'Maverick Village Clubhouse', cx: 27,  cy: 46 },
 ];
-
-// ------------------------------------------------------------------
-// new map: Elmwood Park golf-course loop (200×200)
-function buildElmwoodParkMap() {
-  const W = 200, H = 200;
-  const tiles     = new Array(W * H).fill(T.GRASS);
-  const collision = new Array(W * H).fill(false);
-  const markings  = new Array(W * H).fill(false);
-
-  function idx(x, y) { return y * W + x; }
-  function fillRect(x, y, w, h, tileId) {
-    for (let dy = 0; dy < h; dy++) {
-      for (let dx = 0; dx < w; dx++) {
-        const tx = x + dx, ty = y + dy;
-        if (tx >= 0 && tx < W && ty >= 0 && ty < H) {
-          tiles[idx(tx, ty)] = tileId;
-        }
-      }
-    }
-  }
-
-  // Capsule rasteriser: paints every tile whose centre lies within
-  // (width/2) units of the line segment.  Gap-free on any angle.
-  function drawSegment(x1, y1, x2, y2, tileId, width) {
-    const dx = x2 - x1, dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) return;
-    const half = width / 2;
-    const halfSq = half * half;
-    const minTX = Math.max(0,     Math.floor(Math.min(x1, x2) - half));
-    const maxTX = Math.min(W - 1, Math.ceil (Math.max(x1, x2) + half));
-    const minTY = Math.max(0,     Math.floor(Math.min(y1, y2) - half));
-    const maxTY = Math.min(H - 1, Math.ceil (Math.max(y1, y2) + half));
-    for (let ty = minTY; ty <= maxTY; ty++) {
-      for (let tx = minTX; tx <= maxTX; tx++) {
-        const cx = tx + 0.5 - x1, cy = ty + 0.5 - y1;
-        const t  = Math.max(0, Math.min(1, (cx * dx + cy * dy) / lenSq));
-        const nx = cx - t * dx, ny = cy - t * dy;
-        if (nx * nx + ny * ny <= halfSq) tiles[idx(tx, ty)] = tileId;
-      }
-    }
-  }
-
-  // ── Background ─────────────────────────────────────────
-  // (grass by default)
-
-  // ── Outer loop road around park ─────────────────────────
-  drawSegment(20, 20, 180, 20, T.ASPHALT, 3);
-  drawSegment(180, 20, 180, 180, T.ASPHALT, 3);
-  drawSegment(180, 180, 20, 180, T.ASPHALT, 3);
-  drawSegment(20, 180, 20, 20, T.ASPHALT, 3);
-
-  // ── Inner loop ──────────────────────────────────────────
-  drawSegment(60, 40, 140, 40, T.ASPHALT, 2);
-  drawSegment(140, 40, 140, 140, T.ASPHALT, 2);
-  drawSegment(140, 140, 60, 140, T.ASPHALT, 2);
-  drawSegment(60, 140, 60, 40, T.ASPHALT, 2);
-
-  // ── Dirt connectors ─────────────────────────────────────
-  drawSegment(100, 20, 100, 40, T.DIRT, 1);
-  drawSegment(20, 100, 60, 100, T.DIRT, 1);
-  drawSegment(180, 100, 140, 100, T.DIRT, 1);
-
-  // ── Random trees inside loops ────────────────────────────
-  for (let tx = 30; tx < 170; tx += 15) {
-    for (let ty = 30; ty < 170; ty += 20) {
-      if (Math.random() < 0.2) fillRect(tx, ty, 2, 2, T.TREE);
-    }
-  }
-
-  // ── Pacific St (southern edge) ────────────────────────────
-  drawSegment(0, 190, 200, 190, T.ASPHALT, 3);
-  // occasional center markings
-  for (let mx = 0; mx < 200; mx += 4) {
-    markings[idx(mx, 190)] = true;
-  }
-
-  // parking lots along Pacific St
-  fillRect(10, 185, 30, 10, T.PARKING);
-  fillRect(60, 185, 40, 10, T.PARKING);
-  fillRect(120, 185, 50, 10, T.PARKING);
-
-  // buildings north of Pacific
-  fillRect(15, 170, 10, 10, T.BUILDING);
-  fillRect(70, 170, 12, 12, T.BUILDING);
-  fillRect(130, 170, 8, 16, T.BUILDING);
-
-  // road leading east toward campus start
-  drawSegment(180, 190, 180, 100, T.ASPHALT, 3);
-  fillRect(178, 188, 4, 4, T.INTERSECTION);
-
-  // small campus-like cluster near east edge
-  fillRect(170, 90, 10, 10, T.BUILDING);
-  fillRect(160, 110, 8, 8, T.BUILDING);
-  fillRect(180, 120, 12, 6, T.BUILDING);
-
-  // short north-south connector branch off Pacific
-  drawSegment(150, 190, 150, 160, T.ASPHALT, 2);
-
-  // ── Void border ─────────────────────────────────────────
-  for (let x = 0; x < W; x++) {
-    tiles[idx(x, 0)] = T.VOID;
-    tiles[idx(x, H - 1)] = T.VOID;
-  }
-  for (let y = 0; y < H; y++) {
-    tiles[idx(0, y)] = T.VOID;
-    tiles[idx(W - 1, y)] = T.VOID;
-  }
-
-  // ── Build collisions ────────────────────────────────────
-  for (let i = 0; i < W * H; i++) {
-    collision[i] = TILE_COLLIDABLE[tiles[i]] === true;
-  }
-
-  return { tiles, collision, markings, width: W, height: H };
-}
 
 
 // ── Tileset (procedural, offscreen canvas) ──────────────────────────────────
@@ -484,7 +498,7 @@ function buildFallbackTileset() {
   }
 
   // ── TREE tile ───────────────────────────────────────────────────
-  c.fillStyle = '#1A3A10';
+  c.fillStyle = '#2E6A20';  // match GRASS background
   c.fillRect(0, 64, S, S);
   // Canopy
   c.fillStyle = '#225A14';
@@ -498,6 +512,10 @@ function buildFallbackTileset() {
   // Trunk
   c.fillStyle = '#5A3A18';
   c.fillRect(0 + 29, 64 + 46, 6, 14);
+
+  // ── PARKING tile — flat base only; stall lines are drawn as a world-space overlay ──
+  c.fillStyle = '#26263A';
+  c.fillRect(192, 64, S, S);
 
   // ── BUILDING tile ───────────────────────────────────────────────
   const bx = 0, by = 128;
@@ -710,10 +728,28 @@ window.addEventListener('keydown', e => {
     case 'KeyS': case 'ArrowDown':  INPUT.down      = true; break;
     case 'KeyA': case 'ArrowLeft':  INPUT.left      = true; break;
     case 'KeyD': case 'ArrowRight': INPUT.right     = true; break;
-    case 'Space':                   INPUT.handbrake = true;
+    case 'Space':
+      if (!gameStarted) {
+        helpModalOpen = false;
+        gameStarted = true;
+        document.getElementById('bgm').play().catch(() => {});
+        e.preventDefault();
+        break;
+      }
+      INPUT.handbrake = true;
+      e.preventDefault(); break;
+    case 'KeyH':
+      if (!gameStarted) { helpModalOpen = !helpModalOpen; e.preventDefault(); }
+      break;
+    case 'Escape':
+      if (!gameStarted && helpModalOpen) { helpModalOpen = false; e.preventDefault(); }
+      break;
+    case 'KeyM':
+      minimapExpanded = !minimapExpanded;
       e.preventDefault(); break;
     case 'KeyP':
-      window.location.href = 'Maverick-Mini-Golf/index.html'; break;
+      sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
+      window.location.href = 'Maverick-Mini-Golf/dist/index.html'; break;
   }
 });
 
@@ -766,6 +802,7 @@ let canvas, ctx;
 let tireCanvas, tireCtx;
 let camera = { x: 0, y: 0 };
 let minimapCanvas = null;
+let minimapExpanded = false;
 
 const MM_W = 175, MM_H = 125; // minimap pixel dimensions (1.25px per tile)
 
@@ -850,20 +887,238 @@ function drawRoadMarkings() {
       if (tx < 0 || tx >= MAP.width || ty < 0 || ty >= MAP.height) continue;
       const mark = MAP.markings[ty * MAP.width + tx];
       if (!mark) continue;
+      const tileId = MAP.tiles[ty * MAP.width + tx];
+      if (tileId !== T.ASPHALT && tileId !== T.INTERSECTION) continue;
+      if ((mark & 3) === 3) continue; // both H and V bits set = intersection, skip
 
       const screenX = tx * TILE_SIZE - camera.x + halfW;
       const screenY = ty * TILE_SIZE - camera.y + halfH;
       const half = TILE_SIZE / 2;
 
-      if (mark === 2) {
+      if (mark & 2) {
         // Vertical road — dash runs top-to-bottom, 8px gap at each tile edge
         ctx.fillRect(screenX + half - 2, screenY + 8, 4, 48);
       } else {
-        // Horizontal road (mark===1 or legacy true) — dash runs left-to-right
+        // Horizontal road (bit 1 or legacy true) — dash runs left-to-right
         ctx.fillRect(screenX + 8, screenY + half - 2, 48, 4);
       }
     }
   }
+}
+
+function updateSoccerBall() {
+  if (CURRENT_MAP_NAME !== 'UNO Campus') return;
+
+  const TS = TILE_SIZE;
+  const R  = soccerBall.radius;
+
+  // Field wall boundaries (in world pixels, matching drawSoccerField)
+  const fx1 = SOCCER_FIELD.fx1 * TS;
+  const fy1 = SOCCER_FIELD.fy1 * TS;
+  const fx2 = SOCCER_FIELD.fx2 * TS;
+  const fy2 = SOCCER_FIELD.fy2 * TS;
+
+  // ── Car → ball collision ─────────────────────────────────
+  // Treat car as a circle (radius 22px) for simplicity
+  const CAR_R  = 22;
+  const dx     = soccerBall.x - car.x;
+  const dy     = soccerBall.y - car.y;
+  const distSq = dx * dx + dy * dy;
+  const minD   = CAR_R + R;
+
+  if (distSq < minD * minD && distSq > 0) {
+    const dist = Math.sqrt(distSq);
+    const nx   = dx / dist;
+    const ny   = dy / dist;
+
+    // Impulse based on car speed; preserve a bit of car lateral velocity
+    const carSpeed = Math.sqrt(car.vx * car.vx + car.vy * car.vy);
+    const impulse  = Math.max(carSpeed * 1.1, 2);
+    soccerBall.vx  = nx * impulse + car.vx * 0.25;
+    soccerBall.vy  = ny * impulse + car.vy * 0.25;
+
+    // Push ball out of overlap
+    soccerBall.x = car.x + nx * (minD + 1);
+    soccerBall.y = car.y + ny * (minD + 1);
+  }
+
+  // ── Physics ──────────────────────────────────────────────
+  soccerBall.vx *= 0.97;
+  soccerBall.vy *= 0.97;
+  soccerBall.x  += soccerBall.vx;
+  soccerBall.y  += soccerBall.vy;
+
+  // ── Boundary & goal collision ────────────────────────────
+  // Goal mouth: 4 tiles wide, 1 tile deep (matching drawSoccerField)
+  const fcx     = (fx1 + fx2) / 2;
+  const gHalfW  = 2 * TS;        // half of 4-tile goal width
+  const goalD   = TS;             // 1 tile deep
+  const gX1     = fcx - gHalfW;  // left post world-x
+  const gX2     = fcx + gHalfW;  // right post world-x
+  const topBack = fy1 - goalD;   // back of top goal
+  const botBack = fy2 + goalD;   // back of bottom goal
+
+  // Side walls — always solid
+  if (soccerBall.x - R < fx1) { soccerBall.x = fx1 + R; soccerBall.vx =  Math.abs(soccerBall.vx) * 0.55; }
+  if (soccerBall.x + R > fx2) { soccerBall.x = fx2 - R; soccerBall.vx = -Math.abs(soccerBall.vx) * 0.55; }
+
+  // Top edge: open in the goal mouth, solid elsewhere
+  if (soccerBall.y - R < fy1) {
+    const inMouth = soccerBall.x > gX1 && soccerBall.x < gX2;
+    if (!inMouth) {
+      soccerBall.y = fy1 + R; soccerBall.vy = Math.abs(soccerBall.vy) * 0.55;
+    } else {
+      // Inside top goal — bounce off posts and back net
+      if (soccerBall.x - R < gX1) { soccerBall.x = gX1 + R; soccerBall.vx =  Math.abs(soccerBall.vx) * 0.55; }
+      if (soccerBall.x + R > gX2) { soccerBall.x = gX2 - R; soccerBall.vx = -Math.abs(soccerBall.vx) * 0.55; }
+      if (soccerBall.y - R < topBack) { soccerBall.y = topBack + R; soccerBall.vy = Math.abs(soccerBall.vy) * 0.55; }
+    }
+  }
+
+  // Bottom edge: open in the goal mouth, solid elsewhere
+  if (soccerBall.y + R > fy2) {
+    const inMouth = soccerBall.x > gX1 && soccerBall.x < gX2;
+    if (!inMouth) {
+      soccerBall.y = fy2 - R; soccerBall.vy = -Math.abs(soccerBall.vy) * 0.55;
+    } else {
+      // Inside bottom goal — bounce off posts and back net
+      if (soccerBall.x - R < gX1) { soccerBall.x = gX1 + R; soccerBall.vx =  Math.abs(soccerBall.vx) * 0.55; }
+      if (soccerBall.x + R > gX2) { soccerBall.x = gX2 - R; soccerBall.vx = -Math.abs(soccerBall.vx) * 0.55; }
+      if (soccerBall.y + R > botBack) { soccerBall.y = botBack - R; soccerBall.vy = -Math.abs(soccerBall.vy) * 0.55; }
+    }
+  }
+}
+
+function drawSoccerBall() {
+  if (CURRENT_MAP_NAME !== 'UNO Campus') return;
+
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+  const sx = soccerBall.x - camera.x + halfW;
+  const sy = soccerBall.y - camera.y + halfH;
+  const R  = soccerBall.radius;
+
+  if (sx < -R * 3 || sx > canvas.width  + R * 3 ||
+      sy < -R * 3 || sy > canvas.height + R * 3) return;
+
+  ctx.save();
+
+  // White ball body
+  ctx.beginPath();
+  ctx.arc(sx, sy, R, 0, Math.PI * 2);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+  ctx.strokeStyle = '#1A1A1A';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Classic black pentagon patches (5 arms + center spot)
+  ctx.fillStyle   = '#1A1A1A';
+  ctx.strokeStyle = '#1A1A1A';
+  ctx.lineWidth   = 1;
+
+  // Center patch
+  ctx.beginPath();
+  ctx.arc(sx, sy, R * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Five outer patches connected by stitching lines
+  for (let i = 0; i < 5; i++) {
+    const angle = (i / 5) * Math.PI * 2 - Math.PI / 2;
+    const px = sx + Math.cos(angle) * R * 0.58;
+    const py = sy + Math.sin(angle) * R * 0.58;
+
+    ctx.beginPath();
+    ctx.arc(px, py, R * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(sx + Math.cos(angle) * R * 0.22, sy + Math.sin(angle) * R * 0.22);
+    ctx.lineTo(px, py);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawSoccerField() {
+  if (!MAP || CURRENT_MAP_NAME !== 'UNO Campus') return;
+
+  const halfW = canvas.width / 2;
+  const halfH = canvas.height / 2;
+  const TS = TILE_SIZE;
+
+  // Field boundary in world pixels — open grass between buildings
+  // Safe bounds: x=93 (east of H&K parking), x=108 (west of east building),
+  //              y=44 (south of upper H-road sidewalk at y=43), y=61 (clear of buildings)
+  const fx1 = 94 * TS;   // left edge   (1-tile buffer from H&K parking)
+  const fy1 = 45 * TS;   // top edge    (2-tile buffer from sidewalk at y=43)
+  const fx2 = 108 * TS;  // right edge  (east building starts at x=109)
+  const fy2 = 61 * TS;   // bottom edge (clear of all buildings)
+  const fw  = fx2 - fx1;
+  const fh  = fy2 - fy1;
+  const fcx = (fx1 + fx2) / 2;
+  const fcy = (fy1 + fy2) / 2;
+
+  // World → screen
+  const sx = wx => wx - camera.x + halfW;
+  const sy = wy => wy - camera.y + halfH;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.80)';
+  ctx.fillStyle   = 'rgba(255, 255, 255, 0.80)';
+  ctx.lineWidth   = 3;
+  ctx.lineJoin    = 'round';
+
+  // Outer boundary
+  ctx.strokeRect(sx(fx1), sy(fy1), fw, fh);
+
+  // Center line (horizontal, dividing field top/bottom)
+  ctx.beginPath();
+  ctx.moveTo(sx(fx1), sy(fcy));
+  ctx.lineTo(sx(fx2), sy(fcy));
+  ctx.stroke();
+
+  // Center circle (~2.5 tiles radius)
+  ctx.beginPath();
+  ctx.arc(sx(fcx), sy(fcy), 2.5 * TS, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Center spot
+  ctx.beginPath();
+  ctx.arc(sx(fcx), sy(fcy), 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Goal areas (6-tile wide, 2-tile deep boxes at each end)
+  const gaW = 6 * TS;
+  const gaD = 2 * TS;
+  const gaX1 = fcx - gaW / 2;
+  ctx.strokeRect(sx(gaX1), sy(fy1),       gaW,  gaD);  // top goal area
+  ctx.strokeRect(sx(gaX1), sy(fy2 - gaD), gaW,  gaD);  // bottom goal area
+
+  // Goals (4-tile wide, 1-tile deep, drawn outside the boundary)
+  const goalW = 4 * TS;
+  const goalD = TS;
+  const gX1 = fcx - goalW / 2;
+  const gX2 = fcx + goalW / 2;
+
+  // Top goal
+  ctx.beginPath();
+  ctx.moveTo(sx(gX1), sy(fy1));
+  ctx.lineTo(sx(gX1), sy(fy1 - goalD));
+  ctx.lineTo(sx(gX2), sy(fy1 - goalD));
+  ctx.lineTo(sx(gX2), sy(fy1));
+  ctx.stroke();
+
+  // Bottom goal
+  ctx.beginPath();
+  ctx.moveTo(sx(gX1), sy(fy2));
+  ctx.lineTo(sx(gX1), sy(fy2 + goalD));
+  ctx.lineTo(sx(gX2), sy(fy2 + goalD));
+  ctx.lineTo(sx(gX2), sy(fy2));
+  ctx.stroke();
+
+  ctx.restore();
 }
 
 function drawTireMarks() {
@@ -886,6 +1141,9 @@ function addTireMark(wx, wy) {
 
 function updateTireMarks() {
   if (!car.drifting) return;
+  // Suppress skid marks when reversing — slip angle is always huge going backwards
+  const fwd = car.vx * Math.cos(car.heading) + car.vy * Math.sin(car.heading);
+  if (fwd <= 0) return;
 
   const cos = Math.cos(car.heading);
   const sin = Math.sin(car.heading);
@@ -909,8 +1167,8 @@ function updateTireMarks() {
 // ── Car sprite ──────────────────────────────────────────────
 // Drawn on a 12×20 virtual grid scaled to 36×60px, centered at origin
 const CAR_PALETTE_NORMAL = {
-  body:   '#2244CC',
-  window: '#88AAFF',
+  body:   '#CC2222',
+  window: '#FF8888',
   wheel:  '#111111',
   trim:   '#FFFFFF',
   light:  '#FF4444',
@@ -972,6 +1230,66 @@ function drawCar() {
   ctx.restore();
 }
 
+function drawParkingLotStalls() {
+  if (!MAP || !MAP.parkingLots || !MAP.parkingLots.length) return;
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+
+  // Stall dimensions (world pixels)
+  const STALL_W = TILE_SIZE;       // 64px — stall width  (car is 36px, fits)
+  const STALL_D = TILE_SIZE * 1.5; // 96px — stall depth  (car is 60px, fits)
+  const LANE_W  = TILE_SIZE;       // 64px — driving lane between opposing rows
+  const T       = 2;               // line thickness
+
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+
+  for (const lot of MAP.parkingLots) {
+    const lx = Math.round(lot.x - camera.x + halfW);
+    const ly = Math.round(lot.y - camera.y + halfH);
+    const lw = lot.w;
+    const lh = lot.h;
+
+    // Skip lots entirely off-screen
+    if (lx + lw < 0 || lx > canvas.width || ly + lh < 0 || ly > canvas.height) continue;
+
+    // Clip to this lot's bounds so lines never spill outside
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(lx, ly, lw, lh);
+    ctx.clip();
+
+    // Each row-group = top stalls (back at top, open at bottom) + lane + bottom stalls (back at bottom, open at top)
+    let ry = 0;
+    while (ry < lh) {
+      const topBackY = Math.round(ly + ry);
+      const laneY    = Math.round(ly + ry + STALL_D);
+
+      // ── Top stall row: back line + dividers pointing down (open toward lane) ──
+      ctx.fillRect(lx, topBackY, lw, T);                        // back line
+      for (let sx = 0; sx <= lw; sx += STALL_W)
+        ctx.fillRect(lx + sx - 1, topBackY, T, Math.round(STALL_D)); // dividers
+
+      if (ry + STALL_D >= lh) break;
+
+      // ── Bottom stall row: back line + dividers pointing up (open toward lane) ──
+      if (ry + STALL_D + LANE_W < lh) {
+        const actualBotD = Math.min(Math.round(STALL_D), lh - ry - Math.round(STALL_D) - Math.round(LANE_W));
+        if (actualBotD > 0) {
+          const botStartY = Math.round(laneY + LANE_W);
+          ctx.fillRect(lx, botStartY + actualBotD - T, lw, T);   // back line at bottom
+          for (let sx = 0; sx <= lw; sx += STALL_W)
+            ctx.fillRect(lx + sx - 1, botStartY, T, actualBotD); // dividers
+        }
+      }
+
+      ry += STALL_D * 2 + LANE_W;
+      if (ry >= lh) break;
+    }
+
+    ctx.restore();
+  }
+}
+
 function render() {
   ctx.fillStyle = '#0A0A0A';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -983,7 +1301,14 @@ function render() {
   // 1. Ground / tile grid
   drawTileGrid();
 
-  // 2. Tire marks (persistent)
+  // 2. Parking lot stall lines (world-space overlay)
+  drawParkingLotStalls();
+
+  // 2b. Soccer field markings — Caniglia Field
+  drawSoccerField();
+  drawSoccerBall();
+
+  // 3. Tire marks (persistent)
   drawTireMarks();
 
   // 3. Road markings
@@ -992,7 +1317,10 @@ function render() {
   // 4. Car
   drawCar();
 
-  // 5. HUD
+  // 5. Donut smoke (world-space, above car)
+  drawSmoke();
+
+  // 6. HUD
   drawHUD();
 }
 
@@ -1091,7 +1419,8 @@ function drawHUD() {
     ctx.font = 'bold 16px monospace';
     const tw = ctx.measureText(STATE.nearbyBuilding).width;
     const lx = canvas.width / 2;
-    const ly = canvas.height - 52;
+    // Shift up when a minigame prompt is also visible so both can be seen
+    const ly = (STATE.nearHK || STATE.nearThompson || STATE.nearCaniggia) ? canvas.height - 116 : canvas.height - 52;
     ctx.fillStyle = 'rgba(0,0,20,0.82)';
     ctx.fillRect(lx - tw / 2 - 14, ly - 20, tw + 28, 28);
     ctx.fillStyle = '#E8D080';
@@ -1101,14 +1430,197 @@ function drawHUD() {
     ctx.globalAlpha = 1;
   }
 
+  // ── Thompson Alumni Center — mini-golf prompt ──────────────────
+  if (STATE.nearThompson) {
+    const promptText = '[E]  Maverick Mini Golf';
+    ctx.font = 'bold 15px monospace';
+    const pw = ctx.measureText(promptText).width;
+    const px2 = canvas.width / 2;
+    const py2 = canvas.height - 80;
+    ctx.fillStyle = 'rgba(0,0,20,0.85)';
+    ctx.fillRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.strokeStyle = '#FFDD00';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.fillStyle = '#FFDD00';
+    ctx.textAlign = 'center';
+    ctx.fillText(promptText, px2, py2);
+    ctx.textAlign = 'left';
+  }
+
+  // ── H&K / Wellness Center — climb game prompt ─────────────────
+  if (STATE.nearHK) {
+    const promptText = '[E]  Maverick Climb';
+    ctx.font = 'bold 15px monospace';
+    const pw = ctx.measureText(promptText).width;
+    const px2 = canvas.width / 2;
+    const py2 = canvas.height - 80;
+    ctx.fillStyle = 'rgba(0,0,20,0.85)';
+    ctx.fillRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.strokeStyle = '#FFDD00';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.fillStyle = '#FFDD00';
+    ctx.textAlign = 'center';
+    ctx.fillText(promptText, px2, py2);
+    ctx.textAlign = 'left';
+  }
+
+  // ── Caniglia Field — penalty shootout prompt ───────────────────
+  if (STATE.nearCaniggia) {
+    const promptText = '[E]  Maverick Penalty Shootout';
+    ctx.font = 'bold 15px monospace';
+    const pw = ctx.measureText(promptText).width;
+    const px2 = canvas.width / 2;
+    const py2 = canvas.height - 80;
+    ctx.fillStyle = 'rgba(0,0,20,0.85)';
+    ctx.fillRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.strokeStyle = '#FFDD00';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.fillStyle = '#FFDD00';
+    ctx.textAlign = 'center';
+    ctx.fillText(promptText, px2, py2);
+    ctx.textAlign = 'left';
+  }
+
   // ── Controls hint (bottom) ─────────────────────────────────────
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
   ctx.fillStyle = '#666666';
   ctx.font = '12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake — M: Switch Map — P: Mini-Golf', canvas.width / 2, canvas.height - 10);
+  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake — P: Mini-Golf — M: Map', canvas.width / 2, canvas.height - 10);
   ctx.textAlign = 'left';
+
+  // ── Expanded Map Overlay (M key) ────────────────────────────────
+  if (minimapExpanded && minimapCanvas && MAP) {
+    const MARGIN = 40;
+    const maxW = canvas.width  - MARGIN * 2;
+    const maxH = canvas.height - MARGIN * 2;
+    // Keep map aspect ratio
+    const aspect = MAP.width / MAP.height;
+    let ow = maxW, oh = maxW / aspect;
+    if (oh > maxH) { oh = maxH; ow = maxH * aspect; }
+    const ox = (canvas.width  - ow) / 2;
+    const oy = (canvas.height - oh) / 2;
+
+    // Dim background
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Panel
+    ctx.fillStyle = 'rgba(10,10,20,0.92)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 2;
+    ctx.fillRect(ox - 8, oy - 8, ow + 16, oh + 16 + 22);
+    ctx.strokeRect(ox - 8, oy - 8, ow + 16, oh + 16 + 22);
+
+    // Map image
+    ctx.drawImage(minimapCanvas, ox, oy, ow, oh);
+
+    // Car dot
+    const scaleX = ow / MAP.width;
+    const scaleY = oh / MAP.height;
+    const dotX = ox + (car.x / TILE_SIZE) * scaleX;
+    const dotY = oy + (car.y / TILE_SIZE) * scaleY;
+    ctx.fillStyle = '#FFDD00';
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 5, 0, Math.PI * 2);
+    ctx.fill();
+    // Direction indicator
+    ctx.strokeStyle = '#FFDD00';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(dotX, dotY);
+    ctx.lineTo(dotX + Math.cos(car.heading) * 12, dotY + Math.sin(car.heading) * 12);
+    ctx.stroke();
+
+    // Building name labels — with iterative overlap separation
+    if (CURRENT_MAP_NAME === 'UNO Campus') {
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      const PX = 6, LH = 18;
+
+      // Build label descriptors: anchor = building center, x/y = movable label center
+      const lbls = UNO_CAMPUS_BUILDINGS.map(b => {
+        const ax = ox + b.cx * scaleX;
+        const ay = oy + b.cy * scaleY;
+        return { name: b.name, ax, ay, x: ax, y: ay, w: ctx.measureText(b.name).width + PX * 2, h: LH };
+      });
+
+      // Iteratively push overlapping labels apart (60 passes)
+      for (let iter = 0; iter < 60; iter++) {
+        for (let i = 0; i < lbls.length; i++) {
+          for (let j = i + 1; j < lbls.length; j++) {
+            const a = lbls[i], b = lbls[j];
+            const overlapX = (a.w + b.w) / 2 + 4 - Math.abs(a.x - b.x);
+            const overlapY = (a.h + b.h) / 2 + 4 - Math.abs(a.y - b.y);
+            if (overlapX > 0 && overlapY > 0) {
+              // Push along the axis with less overlap (prefer vertical nudge for same-row clusters)
+              if (overlapX < overlapY) {
+                const push = overlapX / 2 + 1;
+                if (a.x <= b.x) { a.x -= push; b.x += push; }
+                else             { a.x += push; b.x -= push; }
+              } else {
+                const push = overlapY / 2 + 1;
+                if (a.y <= b.y) { a.y -= push; b.y += push; }
+                else             { a.y += push; b.y -= push; }
+              }
+            }
+          }
+        }
+      }
+
+      // Draw connector lines from label back to building anchor when displaced
+      ctx.lineWidth = 1;
+      for (const lb of lbls) {
+        if (Math.hypot(lb.x - lb.ax, lb.y - lb.ay) > 6) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+          ctx.beginPath();
+          ctx.moveTo(lb.ax, lb.ay);
+          ctx.lineTo(lb.x, lb.y);
+          ctx.stroke();
+        }
+        // Anchor dot on building center
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.beginPath();
+        ctx.arc(lb.ax, lb.ay, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Draw pills + text
+      for (const lb of lbls) {
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.beginPath();
+        ctx.roundRect(lb.x - lb.w / 2, lb.y - 13, lb.w, LH, 4);
+        ctx.fill();
+        ctx.shadowColor = '#000';
+        ctx.shadowBlur = 3;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(lb.name, lb.x, lb.y);
+        ctx.shadowBlur = 0;
+      }
+      ctx.textAlign = 'left';
+    }
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(ox, oy, ow, oh);
+
+    // Label
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    if (CURRENT_MAP_NAME) {
+      ctx.fillText(CURRENT_MAP_NAME.toUpperCase(), ox + ow / 2, oy + oh + 16);
+    }
+    ctx.fillStyle = '#555555';
+    ctx.font = '11px monospace';
+    ctx.fillText('press M to close', ox + ow / 2, oy + oh + 30);
+    ctx.textAlign = 'left';
+  }
 
   ctx.restore();
 }
@@ -1138,16 +1650,232 @@ function updateNearbyBuilding() {
     STATE.nearbyBuildingAlpha = Math.max(0, STATE.nearbyBuildingAlpha - 0.06);
     if (STATE.nearbyBuildingAlpha <= 0) STATE.nearbyBuilding = null;
   }
+
+  // Thompson Alumni Center proximity — enables E-key mini-golf nav
+  const THOMPSON_CX = 38, THOMPSON_CY = 13, THOMPSON_R = 10;
+  const tdx = carTX - THOMPSON_CX, tdy = carTY - THOMPSON_CY;
+  STATE.nearThompson = (CURRENT_MAP_NAME === 'UNO Campus') &&
+                       (tdx * tdx + tdy * tdy < THOMPSON_R * THOMPSON_R);
+
+  // H&K / Wellness Center proximity — enables E-key climb game nav
+  // Building is L-shaped: vertical arm x=61–72 y=44–72, foot x=73–92 y=62–72
+  // Right boundary capped at x=93 to avoid overlapping Caniglia Field (starts at x=94)
+  const HK_PAD = 6;
+  STATE.nearHK = (CURRENT_MAP_NAME === 'UNO Campus') &&
+                 (carTX >= 61 - HK_PAD && carTX <= 93 &&
+                  carTY >= 44 - HK_PAD && carTY <= 72 + HK_PAD);
+
+  // Force the building label to show H&K whenever the AABB is active,
+  // overriding the small-radius circle check above
+  if (STATE.nearHK) {
+    STATE.nearbyBuilding = 'H&K / Wellness Center';
+    STATE.nearbyBuildingAlpha = 1;
+  }
+
+  // Caniglia Field proximity — enables E-key penalty shootout nav
+  // Field tiles: x=94–108, y=45–61. Left boundary starts at 94 (no overlap with H&K).
+  const CANIGGIA_PAD = 4;
+  STATE.nearCaniggia = (CURRENT_MAP_NAME === 'UNO Campus') &&
+                       (carTX >= 94 && carTX <= 108 + CANIGGIA_PAD &&
+                        carTY >= 45 - CANIGGIA_PAD && carTY <= 61 + CANIGGIA_PAD);
+
+  // Force the building label to show Caniglia Field whenever the AABB is active
+  if (STATE.nearCaniggia) {
+    STATE.nearbyBuilding = 'Caniglia Field';
+    STATE.nearbyBuildingAlpha = 1;
+  }
+}
+
+// ============================================================
+// [START SCREEN]
+// ============================================================
+let gameStarted    = false;
+let startScreenImg = null;
+let helpModalOpen  = false;
+
+function drawStartScreen() {
+  // Fill with black to create letterbox/pillarbox bars
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Fit image inside canvas while preserving aspect ratio
+  const imgW = startScreenImg.naturalWidth  || startScreenImg.width;
+  const imgH = startScreenImg.naturalHeight || startScreenImg.height;
+  const scale = Math.min(canvas.width / imgW, canvas.height / imgH);
+  const drawW = imgW * scale;
+  const drawH = imgH * scale;
+  const drawX = (canvas.width  - drawW) / 2;
+  const drawY = (canvas.height - drawH) / 2;
+
+  ctx.drawImage(startScreenImg, drawX, drawY, drawW, drawH);
+
+  // prompt label — positioned relative to the drawn image
+  const labelText = 'press space to begin  |  H for help';
+  const fontSize  = Math.max(16, Math.floor(drawH * 0.032));
+  ctx.font        = `${fontSize}px sans-serif`;
+  ctx.textAlign   = 'center';
+  ctx.textBaseline = 'middle';
+
+  const x = drawX + drawW / 2;
+  const y = drawY + drawH * 0.88;
+
+  // subtle dark backing
+  const tw = ctx.measureText(labelText).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(x - tw / 2 - 12, y - fontSize * 0.7, tw + 24, fontSize * 1.4);
+
+  ctx.fillStyle = '#cccccc';
+  ctx.fillText(labelText, x, y);
+}
+
+function drawHelpModal() {
+  const PW  = Math.min(700, canvas.width  - 40);
+  const PH  = Math.min(540, canvas.height - 40);
+  const PX  = (canvas.width  - PW) / 2;
+  const PY  = (canvas.height - PH) / 2;
+  const PAD = 28;
+
+  // dim backdrop
+  ctx.fillStyle = 'rgba(0,0,0,0.78)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // panel
+  ctx.fillStyle = '#0d0d18';
+  ctx.fillRect(PX, PY, PW, PH);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(PX, PY, PW, PH);
+
+  ctx.save();
+  ctx.textBaseline = 'top';
+
+  // ── Title ────────────────────────────────────────────────
+  ctx.fillStyle = '#FFDD00';
+  ctx.font = 'bold 22px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('ELMWOOD DRIFT', PX + PW / 2, PY + PAD);
+
+  ctx.textAlign = 'left';
+
+  // Column split: left half = controls, right half = scoring
+  const col1     = PX + PAD;
+  const col2     = PX + Math.floor(PW / 2) + 10;
+  const KEY_W    = 80;   // fixed width reserved for key label
+  const ROW_H    = 24;   // line height for control rows
+  const SEC_GAP  = 10;   // gap between heading and first row
+  const LABEL_H  = 14;   // monospace heading font size
+
+  function sectionHeading(text, x, y) {
+    ctx.fillStyle = '#666666';
+    ctx.font = `bold ${LABEL_H}px monospace`;
+    ctx.fillText(text.toUpperCase(), x, y);
+  }
+
+  function ctrlRow(key, desc, x, y) {
+    ctx.fillStyle = '#FFDD00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(key, x, y);
+    ctx.fillStyle = '#cccccc';
+    ctx.font = '13px monospace';
+    ctx.fillText(desc, x + KEY_W, y);
+  }
+
+  // ── Controls (left column) ───────────────────────────────
+  let cy = PY + PAD + 36;
+  sectionHeading('Controls', col1, cy);
+  cy += SEC_GAP + LABEL_H;
+
+  const controls = [
+    ['W / ↑',   'Accelerate'],
+    ['S / ↓',   'Brake / Reverse'],
+    ['A / ←',   'Steer left'],
+    ['D / →',   'Steer right'],
+    ['SPACE',   'Handbrake'],
+    ['H',       'Toggle help'],
+  ];
+  for (const [key, desc] of controls) {
+    ctrlRow(key, desc, col1, cy);
+    cy += ROW_H;
+  }
+
+  // ── Scoring (right column) ───────────────────────────────
+  let cy2 = PY + PAD + 36;
+  sectionHeading('Scoring', col2, cy2);
+  cy2 += SEC_GAP + LABEL_H;
+
+  const NOTE_LINE_H = 17;
+  const notes = [
+    ['Drift',  ['Slide your rear wheels to earn', 'points every frame.']],
+    ['Angle',  ['Bigger slip angle = faster point gain.']],
+    ['Combo',  ['Chain drifts within 90 frames', 'for a multiplier (up to x8).']],
+    ['Speed',  ['Must be moving forward while', 'drifting to score.']],
+  ];
+
+  for (const [label, lines] of notes) {
+    ctx.fillStyle = '#FFDD00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(label, col2, cy2);
+    cy2 += NOTE_LINE_H;
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '12px monospace';
+    for (const l of lines) {
+      ctx.fillText(l, col2, cy2);
+      cy2 += NOTE_LINE_H;
+    }
+    cy2 += 6; // gap between scoring entries
+  }
+
+  // ── Locations (full width, below both columns) ───────────
+  const locY = Math.max(cy, cy2) + 16;
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(PX + PAD, locY - 4, PW - PAD * 2, 1); // divider line
+
+  sectionHeading('Locations  (UNO Campus)', col1, locY + 8);
+
+  const LOC_LINE_H = 19;
+  let ly = locY + 8 + SEC_GAP + LABEL_H;
+  ctx.font = '13px monospace';
+
+  const locations = [
+    { label: 'Thompson Alumni Center', action: 'press E  →  Maverick Mini Golf'         },
+    { label: 'H&K / Wellness Center',  action: 'press E  →  Maverick Climb'             },
+    { label: 'Caniglia Field',         action: 'press E  →  Maverick Penalty Shootout'  },
+  ];
+  for (const loc of locations) {
+    ctx.fillStyle = '#FFDD00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('Drive near  ' + loc.label, col1, ly);
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '13px monospace';
+    ctx.fillText(loc.action, col2, ly);
+    ly += LOC_LINE_H;
+  }
+
+  // ── Dismiss hint ─────────────────────────────────────────
+  ctx.fillStyle = 'rgba(255,255,255,0.30)';
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('press H or ESC to close', PX + PW / 2, PY + PH - 18);
+
+  ctx.restore();
 }
 
 // ============================================================
 // [LOOP]
 // ============================================================
 function gameLoop() {
+  if (!gameStarted) {
+    drawStartScreen();
+    if (helpModalOpen) drawHelpModal();
+    requestAnimationFrame(gameLoop);
+    return;
+  }
   STATE.frame++;
   updateCar(INPUT);
   updateScoring();
   updateTireMarks();
+  updateSoccerBall();
+  updateSmoke();
   updateNearbyBuilding();
   render();
   requestAnimationFrame(gameLoop);
@@ -1158,35 +1886,6 @@ function resizeCanvas() {
   canvas.height = window.innerHeight;
 }
 
-function switchMap() {
-  mapIndex = (mapIndex + 1) % MAP_BUILDERS.length;
-  const info = MAP_BUILDERS[mapIndex];
-  MAP = info.build();
-  buildMinimapCanvas();
-  CURRENT_MAP_NAME = info.name;
-  document.title = `Elmwood Drift — ${CURRENT_MAP_NAME}`;
-
-  // reset car in a sensible location for the new map
-  if (info.name === 'Elmwood Park') {
-    // place at Pacific St on the western side
-    car.x = (10 + 0.5) * TILE_SIZE;
-    car.y = (190 + 0.5) * TILE_SIZE;
-  } else {
-    // UNO Campus — spawn on top road near west side, heading east
-    car.x = (12 + 0.5) * TILE_SIZE;
-    car.y = (5  + 0.5) * TILE_SIZE;
-  }
-  car.heading = 0;
-  STATE.score = 0;
-  STATE.combo = 1;
-  STATE.comboTimer = 0;
-  STATE.drifting = false;
-  STATE.slipAngle = 0;
-  STATE.wasDrifting = false;
-
-  camera.x = car.x;
-  camera.y = car.y;
-}
 
 function init() {
   canvas = document.getElementById('game');
@@ -1198,8 +1897,7 @@ function init() {
 
   // prepare map builders list
   MAP_BUILDERS = [
-    { name: 'UNO Campus',   build: buildUNOCampusMap   },
-    { name: 'Elmwood Park', build: buildElmwoodParkMap },
+    { name: 'UNO Campus', build: buildUNOCampusMap },
   ];
   mapIndex = 0;
   CURRENT_MAP_NAME = MAP_BUILDERS[0].name;
@@ -1207,24 +1905,52 @@ function init() {
   MAP = MAP_BUILDERS[0].build();
   buildMinimapCanvas();
 
-  // initial car spawn (UNO campus — top road, heading east)
-  car.x = (12 + 0.5) * TILE_SIZE;
-  car.y = (5  + 0.5) * TILE_SIZE;
-  car.heading = 0; // facing east
+  // Restore position if returning from a minigame, otherwise use default spawn
+  const _mgReturn = sessionStorage.getItem('minigameReturn');
+  if (_mgReturn) {
+    sessionStorage.removeItem('minigameReturn');
+    const _saved = JSON.parse(_mgReturn);
+    car.x = _saved.x;
+    car.y = _saved.y;
+    car.heading = _saved.heading;
+    gameStarted = true;
+  } else {
+    // initial car spawn (UNO campus — top road, heading east)
+    car.x = (12 + 0.5) * TILE_SIZE;
+    car.y = (5  + 0.5) * TILE_SIZE;
+    car.heading = 0; // facing east
+  }
 
   camera.x = car.x;
   camera.y = car.y;
 
-  // allow toggling maps with 'M'
+  resetSoccerBall();
+
+  // mini-golf nav with 'E'
   window.addEventListener('keydown', e => {
-    if (e.key === 'm' || e.key === 'M') {
-      switchMap();
+    if (e.key === 'e' || e.key === 'E') {
+      if (STATE.nearThompson) {
+        sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
+        window.location.href = 'Maverick-Mini-Golf/dist/index.html';
+      } else if (STATE.nearHK) {
+        sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
+        window.location.href = 'maverick_climb/index.html';
+      } else if (STATE.nearCaniggia) {
+        sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
+        window.location.href = 'maverick_penalty_shootout/index.html';
+      }
     }
   });
 
-  // load tileset then start game loop
+  // BGM volume (play triggered by Space on start screen)
+  document.getElementById('bgm').volume = 0.5;
+
+  // load tileset + start screen image, then kick off the loop
   loadTileset(() => {
-    requestAnimationFrame(gameLoop);
+    startScreenImg = new Image();
+    startScreenImg.onload  = () => requestAnimationFrame(gameLoop);
+    startScreenImg.onerror = () => { gameStarted = true; requestAnimationFrame(gameLoop); };
+    startScreenImg.src = 'assets/start-screen.png';
   });
 }
 

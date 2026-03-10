@@ -71,7 +71,10 @@ export class Menu {
     const upNow    = input.justPressed('UP');
     const downNow  = input.justPressed('DOWN');
     const enterNow = input.justPressed('SHOT') || input.justPressed('ENTER');
+    const escNow   = input.justPressed('ESC');
     const clickNow = input.mouseJustDown;
+
+    if (escNow) { history.back(); return; }
 
     const menuItems = 2; // PLAY, LEADERBOARD
 

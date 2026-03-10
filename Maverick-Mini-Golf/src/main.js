@@ -76,6 +76,12 @@ class Game {
     this.leaderboard = new Leaderboard();
     this.holeIntro   = new HoleIntro();
 
+    // Background music
+    this._bgm = new Audio('../assets/music/878460_Mind-Games.mp3');
+    this._bgm.loop   = true;
+    this._bgm.volume = 0.5;
+    this._bgmStarted = false;
+
     // Wire up all UI callbacks
     this._setupCallbacks();
 
@@ -95,6 +101,8 @@ class Game {
       this.currentHole = 1;
       this.scores      = [];
       this.totalPar    = 0;
+      this._bgm.play().catch(() => {});
+      this._bgmStarted = true;
       this._startHole(1);
     };
 
@@ -108,6 +116,8 @@ class Game {
     this.leaderboard.onBack = () => {
       this.leaderboard.hide();
       this.state = STATE.MENU;
+      this._bgm.pause();
+      this._bgm.currentTime = 0;
     };
 
     // Hole intro animation finished → begin play
@@ -128,6 +138,8 @@ class Game {
         }
       } else if (this.state === STATE.GAME_OVER) {
         this.state = STATE.MENU;
+        this._bgm.pause();
+        this._bgm.currentTime = 0;
       }
     };
   }
@@ -286,6 +298,8 @@ class Game {
     const ball = this.ball;
     if (!ball) return;
 
+    if (this.input.justPressed('ESC')) { this.state = STATE.MENU; return; }
+
     // ---- Keyboard aiming ----
     if (this.input.isDown('LEFT'))  this.aimLine.turnLeft();
     if (this.input.isDown('RIGHT')) this.aimLine.turnRight();
@@ -339,6 +353,8 @@ class Game {
     const ball = this.ball;
     const cup  = this.holeManager.getCup();
     if (!ball || !cup) return;
+
+    if (this.input.justPressed('ESC')) { this.state = STATE.MENU; return; }
 
     // Fast-forward: hold F or Shift to run at 3× speed
     if (this.input.isDown('FAST')) dt = Math.min(dt * 3, 0.05);
