@@ -244,9 +244,23 @@ function buildUNOCampusMap() {
     }
   }
 
+  // Like fillRect but won't overwrite existing ASPHALT or INTERSECTION tiles.
+  // Used for sidewalk edges so they don't cut through crossing roads.
+  function fillSidewalk(x, y, w, h) {
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        const tx = x + dx, ty = y + dy;
+        if (tx < 0 || tx >= W || ty < 0 || ty >= H) continue;
+        const id = tiles[idx(tx, ty)];
+        if (id === T.ASPHALT || id === T.INTERSECTION) continue;
+        tiles[idx(tx, ty)] = T.SIDEWALK;
+      }
+    }
+  }
+
   function drawHRoad(x, y, len, roadWidth) {
-    fillRect(x, y - 1, len, 1, T.SIDEWALK);
-    fillRect(x, y + roadWidth, len, 1, T.SIDEWALK);
+    fillSidewalk(x, y - 1, len, 1);
+    fillSidewalk(x, y + roadWidth, len, 1);
     fillRect(x, y, len, roadWidth, T.ASPHALT);
     if (roadWidth >= 2) {
       const cy = y + Math.floor(roadWidth / 2);
@@ -255,8 +269,8 @@ function buildUNOCampusMap() {
   }
 
   function drawVRoad(x, y, len, roadWidth) {
-    fillRect(x - 1, y, 1, len, T.SIDEWALK);
-    fillRect(x + roadWidth, y, 1, len, T.SIDEWALK);
+    fillSidewalk(x - 1, y, 1, len);
+    fillSidewalk(x + roadWidth, y, 1, len);
     fillRect(x, y, roadWidth, len, T.ASPHALT);
     if (roadWidth >= 2) {
       const cx = x + Math.floor(roadWidth / 2);
@@ -483,7 +497,7 @@ function buildFallbackTileset() {
   }
 
   // ── TREE tile ───────────────────────────────────────────────────
-  c.fillStyle = '#1A3A10';
+  c.fillStyle = '#2E6A20';  // match GRASS background
   c.fillRect(0, 64, S, S);
   // Canopy
   c.fillStyle = '#225A14';
@@ -868,7 +882,8 @@ function drawRoadMarkings() {
       if (tx < 0 || tx >= MAP.width || ty < 0 || ty >= MAP.height) continue;
       const mark = MAP.markings[ty * MAP.width + tx];
       if (!mark) continue;
-      if (MAP.tiles[ty * MAP.width + tx] === T.VOID) continue;
+      const tileId = MAP.tiles[ty * MAP.width + tx];
+      if (tileId !== T.ASPHALT && tileId !== T.INTERSECTION) continue;
       if ((mark & 3) === 3) continue; // both H and V bits set = intersection, skip
 
       const screenX = tx * TILE_SIZE - camera.x + halfW;
@@ -1485,7 +1500,7 @@ function updateNearbyBuilding() {
   }
 
   // Thompson Alumni Center proximity — enables E-key mini-golf nav
-  const THOMPSON_CX = 38, THOMPSON_CY = 13, THOMPSON_R = 7;
+  const THOMPSON_CX = 38, THOMPSON_CY = 13, THOMPSON_R = 10;
   const tdx = carTX - THOMPSON_CX, tdy = carTY - THOMPSON_CY;
   STATE.nearThompson = (CURRENT_MAP_NAME === 'UNO Campus') &&
                        (tdx * tdx + tdy * tdy < THOMPSON_R * THOMPSON_R);
