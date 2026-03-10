@@ -1452,7 +1452,7 @@ function drawHUD() {
   ctx.fillStyle = '#666666';
   ctx.font = '12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake — M: Switch Map — P: Mini-Golf', canvas.width / 2, canvas.height - 10);
+  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake — P: Mini-Golf', canvas.width / 2, canvas.height - 10);
   ctx.textAlign = 'left';
 
   ctx.restore();
@@ -1611,7 +1611,6 @@ function drawHelpModal() {
     ['A / ←',   'Steer left'],
     ['D / →',   'Steer right'],
     ['SPACE',   'Handbrake'],
-    ['M',       'Switch map'],
     ['H',       'Toggle help'],
   ];
   for (const [key, desc] of controls) {
@@ -1706,31 +1705,6 @@ function resizeCanvas() {
   canvas.height = window.innerHeight;
 }
 
-function switchMap() {
-  mapIndex = (mapIndex + 1) % MAP_BUILDERS.length;
-  const info = MAP_BUILDERS[mapIndex];
-  MAP = info.build();
-  buildMinimapCanvas();
-  CURRENT_MAP_NAME = info.name;
-  document.title = `Elmwood Drift — ${CURRENT_MAP_NAME}`;
-
-  // reset car in a sensible location for the new map
-  // UNO Campus — spawn on top road near west side, heading east
-  car.x = (12 + 0.5) * TILE_SIZE;
-  car.y = (5  + 0.5) * TILE_SIZE;
-  car.heading = 0;
-  STATE.score = 0;
-  STATE.combo = 1;
-  STATE.comboTimer = 0;
-  STATE.drifting = false;
-  STATE.slipAngle = 0;
-  STATE.wasDrifting = false;
-
-  camera.x = car.x;
-  camera.y = car.y;
-
-  resetSoccerBall();
-}
 
 function init() {
   canvas = document.getElementById('game');
