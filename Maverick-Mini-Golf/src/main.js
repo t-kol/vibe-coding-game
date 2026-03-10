@@ -289,6 +289,8 @@ class Game {
     const ball = this.ball;
     if (!ball) return;
 
+    if (this.input.justPressed('ESC')) { this.state = STATE.MENU; return; }
+
     // ---- Keyboard aiming ----
     if (this.input.isDown('LEFT'))  this.aimLine.turnLeft();
     if (this.input.isDown('RIGHT')) this.aimLine.turnRight();
@@ -342,6 +344,8 @@ class Game {
     const ball = this.ball;
     const cup  = this.holeManager.getCup();
     if (!ball || !cup) return;
+
+    if (this.input.justPressed('ESC')) { this.state = STATE.MENU; return; }
 
     // Fast-forward: hold F or Shift to run at 3× speed
     if (this.input.isDown('FAST')) dt = Math.min(dt * 3, 0.05);
