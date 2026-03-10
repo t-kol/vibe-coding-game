@@ -888,6 +888,86 @@ function drawRoadMarkings() {
   }
 }
 
+function drawSoccerField() {
+  if (!MAP || CURRENT_MAP_NAME !== 'UNO Campus') return;
+
+  const halfW = canvas.width / 2;
+  const halfH = canvas.height / 2;
+  const TS = TILE_SIZE;
+
+  // Field boundary in world pixels — open grass between buildings
+  // Safe bounds: x=93 (east of H&K parking), x=108 (west of east building),
+  //              y=44 (south of upper H-road sidewalk at y=43), y=61 (clear of buildings)
+  const fx1 = 94 * TS;   // left edge   (1-tile buffer from H&K parking)
+  const fy1 = 45 * TS;   // top edge    (2-tile buffer from sidewalk at y=43)
+  const fx2 = 108 * TS;  // right edge  (east building starts at x=109)
+  const fy2 = 61 * TS;   // bottom edge (clear of all buildings)
+  const fw  = fx2 - fx1;
+  const fh  = fy2 - fy1;
+  const fcx = (fx1 + fx2) / 2;
+  const fcy = (fy1 + fy2) / 2;
+
+  // World → screen
+  const sx = wx => wx - camera.x + halfW;
+  const sy = wy => wy - camera.y + halfH;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.80)';
+  ctx.fillStyle   = 'rgba(255, 255, 255, 0.80)';
+  ctx.lineWidth   = 3;
+  ctx.lineJoin    = 'round';
+
+  // Outer boundary
+  ctx.strokeRect(sx(fx1), sy(fy1), fw, fh);
+
+  // Center line (horizontal, dividing field top/bottom)
+  ctx.beginPath();
+  ctx.moveTo(sx(fx1), sy(fcy));
+  ctx.lineTo(sx(fx2), sy(fcy));
+  ctx.stroke();
+
+  // Center circle (~2.5 tiles radius)
+  ctx.beginPath();
+  ctx.arc(sx(fcx), sy(fcy), 2.5 * TS, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Center spot
+  ctx.beginPath();
+  ctx.arc(sx(fcx), sy(fcy), 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Goal areas (6-tile wide, 2-tile deep boxes at each end)
+  const gaW = 6 * TS;
+  const gaD = 2 * TS;
+  const gaX1 = fcx - gaW / 2;
+  ctx.strokeRect(sx(gaX1), sy(fy1),       gaW,  gaD);  // top goal area
+  ctx.strokeRect(sx(gaX1), sy(fy2 - gaD), gaW,  gaD);  // bottom goal area
+
+  // Goals (4-tile wide, 1-tile deep, drawn outside the boundary)
+  const goalW = 4 * TS;
+  const goalD = TS;
+  const gX1 = fcx - goalW / 2;
+  const gX2 = fcx + goalW / 2;
+
+  // Top goal
+  ctx.beginPath();
+  ctx.moveTo(sx(gX1), sy(fy1));
+  ctx.lineTo(sx(gX1), sy(fy1 - goalD));
+  ctx.lineTo(sx(gX2), sy(fy1 - goalD));
+  ctx.lineTo(sx(gX2), sy(fy1));
+  ctx.stroke();
+
+  // Bottom goal
+  ctx.beginPath();
+  ctx.moveTo(sx(gX1), sy(fy2));
+  ctx.lineTo(sx(gX1), sy(fy2 + goalD));
+  ctx.lineTo(sx(gX2), sy(fy2 + goalD));
+  ctx.lineTo(sx(gX2), sy(fy2));
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawTireMarks() {
   if (tireMarks.length === 0) return;
   const halfW = canvas.width  / 2;
@@ -1067,6 +1147,9 @@ function render() {
 
   // 2. Parking lot stall lines (world-space overlay)
   drawParkingLotStalls();
+
+  // 2b. Soccer field markings — Caniglia Field
+  drawSoccerField();
 
   // 3. Tire marks (persistent)
   drawTireMarks();
