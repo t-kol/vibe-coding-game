@@ -149,7 +149,7 @@ function buildUNOCampusMap() {
     fillRect(x, y, len, roadWidth, T.ASPHALT);
     if (roadWidth >= 2) {
       const cy = y + Math.floor(roadWidth / 2);
-      for (let mx = x; mx < x + len; mx++) markings[idx(mx, cy)] = 1; // 1 = H dash
+      for (let mx = x; mx < x + len; mx++) markings[idx(mx, cy)] |= 1; // bit 1 = H dash
     }
   }
 
@@ -159,7 +159,7 @@ function buildUNOCampusMap() {
     fillRect(x, y, roadWidth, len, T.ASPHALT);
     if (roadWidth >= 2) {
       const cx = x + Math.floor(roadWidth / 2);
-      for (let my = y; my < y + len; my++) markings[idx(cx, my)] = 2; // 2 = V dash
+      for (let my = y; my < y + len; my++) markings[idx(cx, my)] |= 2; // bit 2 = V dash
     }
   }
 
@@ -206,6 +206,9 @@ function buildUNOCampusMap() {
   fillRect(5,  7, 22, 16, T.PARKING);  // upper-left parking
   fillRect(20, 26, 17, 13, T.PARKING); // middle-left parking
   fillRect(20, 44, 17, 11, T.PARKING); // lower-left parking (below upper H-road)
+
+  // H&K inner-L parking lot — fills the open corner between the two building arms
+  fillRect(73, 44, 20, 18, T.PARKING); // x=73–92, y=44–61
 
   // ── Roads (blue circuit highlights) ──────────────────────────────────────
 
@@ -287,7 +290,18 @@ function buildUNOCampusMap() {
     collision[i] = TILE_COLLIDABLE[tiles[i]] === true;
   }
 
-  return { tiles, collision, markings, width: W, height: H };
+  // Parking lot areas (world pixels) — used by drawParkingLotStalls()
+  const TS = TILE_SIZE;
+  const parkingLots = [
+    // upper-left parking split by left road (x=12–14) + sidewalks (x=11,15)
+    { x:  5*TS, y:  7*TS, w:  6*TS, h: 16*TS },  // upper-left west half  (tiles x=5–10)
+    { x: 16*TS, y:  7*TS, w: 11*TS, h: 16*TS },  // upper-left east half  (tiles x=16–26)
+    { x: 20*TS, y: 26*TS, w: 17*TS, h: 13*TS },  // middle-left
+    { x: 20*TS, y: 44*TS, w: 17*TS, h: 11*TS },  // lower-left
+    { x: 73*TS, y: 44*TS, w: 20*TS, h: 18*TS },  // H&K inner-L
+  ];
+
+  return { tiles, collision, markings, width: W, height: H, parkingLots };
 }
 
 // Building proximity labels for UNO Campus (tile-space centres)
@@ -498,6 +512,10 @@ function buildFallbackTileset() {
   // Trunk
   c.fillStyle = '#5A3A18';
   c.fillRect(0 + 29, 64 + 46, 6, 14);
+
+  // ── PARKING tile — flat base only; stall lines are drawn as a world-space overlay ──
+  c.fillStyle = '#26263A';
+  c.fillRect(192, 64, S, S);
 
   // ── BUILDING tile ───────────────────────────────────────────────
   const bx = 0, by = 128;
@@ -850,16 +868,18 @@ function drawRoadMarkings() {
       if (tx < 0 || tx >= MAP.width || ty < 0 || ty >= MAP.height) continue;
       const mark = MAP.markings[ty * MAP.width + tx];
       if (!mark) continue;
+      if (MAP.tiles[ty * MAP.width + tx] === T.VOID) continue;
+      if ((mark & 3) === 3) continue; // both H and V bits set = intersection, skip
 
       const screenX = tx * TILE_SIZE - camera.x + halfW;
       const screenY = ty * TILE_SIZE - camera.y + halfH;
       const half = TILE_SIZE / 2;
 
-      if (mark === 2) {
+      if (mark & 2) {
         // Vertical road — dash runs top-to-bottom, 8px gap at each tile edge
         ctx.fillRect(screenX + half - 2, screenY + 8, 4, 48);
       } else {
-        // Horizontal road (mark===1 or legacy true) — dash runs left-to-right
+        // Horizontal road (bit 1 or legacy true) — dash runs left-to-right
         ctx.fillRect(screenX + 8, screenY + half - 2, 48, 4);
       }
     }
@@ -909,8 +929,8 @@ function updateTireMarks() {
 // ── Car sprite ──────────────────────────────────────────────
 // Drawn on a 12×20 virtual grid scaled to 36×60px, centered at origin
 const CAR_PALETTE_NORMAL = {
-  body:   '#2244CC',
-  window: '#88AAFF',
+  body:   '#CC2222',
+  window: '#FF8888',
   wheel:  '#111111',
   trim:   '#FFFFFF',
   light:  '#FF4444',
@@ -972,6 +992,66 @@ function drawCar() {
   ctx.restore();
 }
 
+function drawParkingLotStalls() {
+  if (!MAP || !MAP.parkingLots || !MAP.parkingLots.length) return;
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+
+  // Stall dimensions (world pixels)
+  const STALL_W = TILE_SIZE;       // 64px — stall width  (car is 36px, fits)
+  const STALL_D = TILE_SIZE * 1.5; // 96px — stall depth  (car is 60px, fits)
+  const LANE_W  = TILE_SIZE;       // 64px — driving lane between opposing rows
+  const T       = 2;               // line thickness
+
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+
+  for (const lot of MAP.parkingLots) {
+    const lx = Math.round(lot.x - camera.x + halfW);
+    const ly = Math.round(lot.y - camera.y + halfH);
+    const lw = lot.w;
+    const lh = lot.h;
+
+    // Skip lots entirely off-screen
+    if (lx + lw < 0 || lx > canvas.width || ly + lh < 0 || ly > canvas.height) continue;
+
+    // Clip to this lot's bounds so lines never spill outside
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(lx, ly, lw, lh);
+    ctx.clip();
+
+    // Each row-group = top stalls (back at top, open at bottom) + lane + bottom stalls (back at bottom, open at top)
+    let ry = 0;
+    while (ry < lh) {
+      const topBackY = Math.round(ly + ry);
+      const laneY    = Math.round(ly + ry + STALL_D);
+
+      // ── Top stall row: back line + dividers pointing down (open toward lane) ──
+      ctx.fillRect(lx, topBackY, lw, T);                        // back line
+      for (let sx = 0; sx <= lw; sx += STALL_W)
+        ctx.fillRect(lx + sx - 1, topBackY, T, Math.round(STALL_D)); // dividers
+
+      if (ry + STALL_D >= lh) break;
+
+      // ── Bottom stall row: back line + dividers pointing up (open toward lane) ──
+      if (ry + STALL_D + LANE_W < lh) {
+        const actualBotD = Math.min(Math.round(STALL_D), lh - ry - Math.round(STALL_D) - Math.round(LANE_W));
+        if (actualBotD > 0) {
+          const botStartY = Math.round(laneY + LANE_W);
+          ctx.fillRect(lx, botStartY + actualBotD - T, lw, T);   // back line at bottom
+          for (let sx = 0; sx <= lw; sx += STALL_W)
+            ctx.fillRect(lx + sx - 1, botStartY, T, actualBotD); // dividers
+        }
+      }
+
+      ry += STALL_D * 2 + LANE_W;
+      if (ry >= lh) break;
+    }
+
+    ctx.restore();
+  }
+}
+
 function render() {
   ctx.fillStyle = '#0A0A0A';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -983,7 +1063,10 @@ function render() {
   // 1. Ground / tile grid
   drawTileGrid();
 
-  // 2. Tire marks (persistent)
+  // 2. Parking lot stall lines (world-space overlay)
+  drawParkingLotStalls();
+
+  // 3. Tire marks (persistent)
   drawTireMarks();
 
   // 3. Road markings
