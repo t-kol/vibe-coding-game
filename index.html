@@ -846,6 +846,7 @@ window.addEventListener('keydown', e => {
       if (!gameStarted && helpModalOpen) { helpModalOpen = false; e.preventDefault(); }
       break;
     case 'KeyP':
+      sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
       window.location.href = 'Maverick-Mini-Golf/dist/index.html'; break;
   }
 });
@@ -1514,7 +1515,8 @@ function drawHUD() {
     ctx.font = 'bold 16px monospace';
     const tw = ctx.measureText(STATE.nearbyBuilding).width;
     const lx = canvas.width / 2;
-    const ly = canvas.height - 52;
+    // Shift up when a minigame prompt is also visible so both can be seen
+    const ly = (STATE.nearHK || STATE.nearThompson) ? canvas.height - 116 : canvas.height - 52;
     ctx.fillStyle = 'rgba(0,0,20,0.82)';
     ctx.fillRect(lx - tw / 2 - 14, ly - 20, tw + 28, 28);
     ctx.fillStyle = '#E8D080';
@@ -1604,8 +1606,20 @@ function updateNearbyBuilding() {
   STATE.nearThompson = (CURRENT_MAP_NAME === 'UNO Campus') &&
                        (tdx * tdx + tdy * tdy < THOMPSON_R * THOMPSON_R);
 
-  // H&K / Wellness Center — only show [E] prompt when the building label is visible
-  STATE.nearHK = STATE.nearbyBuilding === 'H&K / Wellness Center';
+  // H&K / Wellness Center proximity — enables E-key climb game nav
+  // Building is L-shaped: vertical arm x=61–72 y=44–72, foot x=73–92 y=62–72
+  // Use a padded AABB so the player can trigger from anywhere near the building
+  const HK_PAD = 6;
+  STATE.nearHK = (CURRENT_MAP_NAME === 'UNO Campus') &&
+                 (carTX >= 61 - HK_PAD && carTX <= 92 + HK_PAD &&
+                  carTY >= 44 - HK_PAD && carTY <= 72 + HK_PAD);
+
+  // Force the building label to show H&K whenever the AABB is active,
+  // overriding the small-radius circle check above
+  if (STATE.nearHK) {
+    STATE.nearbyBuilding = 'H&K / Wellness Center';
+    STATE.nearbyBuildingAlpha = 1;
+  }
 }
 
 // ============================================================
@@ -1859,10 +1873,21 @@ function init() {
   MAP = MAP_BUILDERS[0].build();
   buildMinimapCanvas();
 
-  // initial car spawn (UNO campus — top road, heading east)
-  car.x = (12 + 0.5) * TILE_SIZE;
-  car.y = (5  + 0.5) * TILE_SIZE;
-  car.heading = 0; // facing east
+  // Restore position if returning from a minigame, otherwise use default spawn
+  const _mgReturn = sessionStorage.getItem('minigameReturn');
+  if (_mgReturn) {
+    sessionStorage.removeItem('minigameReturn');
+    const _saved = JSON.parse(_mgReturn);
+    car.x = _saved.x;
+    car.y = _saved.y;
+    car.heading = _saved.heading;
+    gameStarted = true;
+  } else {
+    // initial car spawn (UNO campus — top road, heading east)
+    car.x = (12 + 0.5) * TILE_SIZE;
+    car.y = (5  + 0.5) * TILE_SIZE;
+    car.heading = 0; // facing east
+  }
 
   camera.x = car.x;
   camera.y = car.y;
@@ -1875,8 +1900,13 @@ function init() {
       switchMap();
     }
     if (e.key === 'e' || e.key === 'E') {
-      if (STATE.nearThompson) window.location.href = 'Maverick-Mini-Golf/dist/index.html';
-      else if (STATE.nearHK)  window.location.href = 'maverick_climb/index.html';
+      if (STATE.nearThompson) {
+        sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
+        window.location.href = 'Maverick-Mini-Golf/dist/index.html';
+      } else if (STATE.nearHK) {
+        sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
+        window.location.href = 'maverick_climb/index.html';
+      }
     }
   });
 
