@@ -196,6 +196,7 @@ export const KEYS = {
   ENTER: ['Enter'],
   SPIN_L:['KeyQ'],
   SPIN_R:['KeyE'],
+  FAST:  ['KeyF', 'ShiftLeft', 'ShiftRight'],  // fast-forward while ball rolls
 };
 
 // --- Power bar settings ---

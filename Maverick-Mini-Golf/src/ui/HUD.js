@@ -24,6 +24,7 @@ export class HUD {
     this.trickShotShowing = false;
     this.trickShotTimer   = 0;
     this.holeInOneShowing = false;
+    this.holeInOneTimer   = 0;
     this.scorePopups      = []; // { text, x, y, age, maxAge, color }
     this.goalHornTimer    = 0;
     this._animTime        = 0;
@@ -36,7 +37,7 @@ export class HUD {
   }
 
   showTrickShot()  { this.trickShotShowing = true; this.trickShotTimer = 2.5; }
-  showHoleInOne()  { this.holeInOneShowing = true; }
+  showHoleInOne()  { this.holeInOneShowing = true; this.holeInOneTimer = 5.0; }
   showGoalHorn()   { this.goalHornTimer = 1.5; }
 
   addScorePopup(text, x, y, color = COLORS.UNO_WHITE) {
@@ -55,6 +56,10 @@ export class HUD {
       if (this.trickShotTimer <= 0) this.trickShotShowing = false;
     }
     if (this.goalHornTimer > 0) this.goalHornTimer -= dt;
+    if (this.holeInOneTimer > 0) {
+      this.holeInOneTimer -= dt;
+      if (this.holeInOneTimer <= 0) this.holeInOneShowing = false;
+    }
 
     this.scorePopups = this.scorePopups.filter(p => {
       p.age += dt;
@@ -393,7 +398,9 @@ export class HUD {
   }
 
   _drawHoleInOne(ctx) {
-    // "HOLE IN ONE!" — persistent celebration banner until dismissed
+    // "HOLE IN ONE!" — fades out after 5 seconds
+    const alpha = this.holeInOneTimer < 0.8 ? Math.max(0, this.holeInOneTimer / 0.8) : 1;
+    ctx.globalAlpha = alpha;
     const pulse = 1 + Math.sin(this._animTime * 6) * 0.05;
     const bw    = 160;
     const bh    = 24;
@@ -418,6 +425,7 @@ export class HUD {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('HOLE IN ONE!!!', CANVAS.WIDTH / 2, by + bh / 2 + 1);
+    ctx.globalAlpha = 1;
     ctx.textBaseline = 'alphabetic';
   }
 }

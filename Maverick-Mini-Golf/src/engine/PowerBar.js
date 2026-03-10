@@ -12,6 +12,7 @@ export class PowerBar {
     this.released = false;    // true for ONE frame when shot is released
     this._pendingLaunch = false;
     this.launchPower = 0;     // power captured at release moment
+    this._dir = 1;            // oscillation direction: +1 filling, -1 draining
   }
 
   // ----------------------------------------------------------------
@@ -22,6 +23,7 @@ export class PowerBar {
   startFill() {
     this.filling = true;
     this.value = 0;
+    this._dir = 1;
     this.released = false;
     this._pendingLaunch = false;
     this.launchPower = 0;
@@ -34,7 +36,14 @@ export class PowerBar {
    */
   update(dt) {
     if (this.filling) {
-      this.value = Math.min(1.0, this.value + POWER_BAR.FILL_RATE * dt);
+      this.value += POWER_BAR.FILL_RATE * dt * this._dir;
+      if (this.value >= 1.0) {
+        this.value = 1.0;
+        this._dir = -1;   // reverse: start draining
+      } else if (this.value <= 0) {
+        this.value = 0;
+        this._dir = 1;    // reverse: start filling again
+      }
     }
     return null; // Launch power is consumed via consume()
   }

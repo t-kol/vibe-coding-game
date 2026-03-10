@@ -169,9 +169,9 @@ export class Menu {
     ctx.fillStyle = COLORS.HUD_DIM;
     ctx.font = '6px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('ELMWOOD PARK GOLF COURSE', CANVAS.WIDTH / 2, titleY + 22);
+    ctx.fillText('ELMWOOD PARK GOLF COURSE', CANVAS.WIDTH / 2, titleY + 30);
     ctx.fillStyle = '#7A7A7A';
-    ctx.fillText('UNIVERSITY OF NEBRASKA OMAHA', CANVAS.WIDTH / 2, titleY + 30);
+    ctx.fillText('UNIVERSITY OF NEBRASKA OMAHA', CANVAS.WIDTH / 2, titleY + 38);
 
     // --- Menu buttons ---
     const btnW    = 90;
@@ -282,12 +282,12 @@ export class Menu {
 
     // Shadow
     ctx.fillStyle = COLORS.UNO_BLACK;
-    this._drawPixelString(ctx, text,  CANVAS.WIDTH / 2 + 1, y - 6 + 1, scale, '#0A0A0A');
-    this._drawPixelString(ctx, text2, CANVAS.WIDTH / 2 + 1, y + 8 + 1, scale, '#0A0A0A');
+    this._drawPixelString(ctx, text,  CANVAS.WIDTH / 2 + 1, y - 10 + 1, scale, '#0A0A0A');
+    this._drawPixelString(ctx, text2, CANVAS.WIDTH / 2 + 1, y +  8 + 1, scale, '#0A0A0A');
 
     // Main text in UNO_RED
-    this._drawPixelString(ctx, text,  CANVAS.WIDTH / 2, y - 6, scale, COLORS.UNO_RED);
-    this._drawPixelString(ctx, text2, CANVAS.WIDTH / 2, y + 8, scale, '#FFD700');
+    this._drawPixelString(ctx, text,  CANVAS.WIDTH / 2, y - 10, scale, COLORS.UNO_RED);
+    this._drawPixelString(ctx, text2, CANVAS.WIDTH / 2, y +  8, scale, '#FFD700');
   }
 
   _drawPixelString(ctx, str, cx, y, scale, color) {

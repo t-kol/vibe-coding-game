@@ -58,6 +58,11 @@ class Game {
     this.lastBallPos    = null;     // snapshot for LASSO mulligan
     this.lastBallVel    = null;
 
+    // Maverick's independent screen position (walks to ball after each shot)
+    this.maverickX        = 0;
+    this.maverickY        = 0;
+    this._ballJustStopped = false;
+
     // ---- Trick-shot tracking ----
     this.wallHitsThisShot = 0;
 
@@ -134,6 +139,8 @@ class Game {
 
     const tee = this.holeManager.getTee();
     this.ball  = new Ball(tee.x, tee.y);
+    this.maverickX = tee.x;
+    this.maverickY = tee.y;
     this.wind  = new Wind(this.mode);
 
     this.strokes            = 0;
@@ -306,6 +313,11 @@ class Game {
       this._useLasso();
     }
 
+    // ---- Keep Maverick positioned offset behind ball along aim direction ----
+    const angle    = this.aimLine.angle;
+    this.maverickX = this.ball.x - Math.cos(angle) * 14;
+    this.maverickY = this.ball.y - Math.sin(angle) * 14;
+
     // ---- Maverick idle animation ----
     this.maverick.update(dt);
   }
@@ -318,6 +330,9 @@ class Game {
     const ball = this.ball;
     const cup  = this.holeManager.getCup();
     if (!ball || !cup) return;
+
+    // Fast-forward: hold F or Shift to run at 3× speed
+    if (this.input.isDown('FAST')) dt = Math.min(dt * 3, 0.05);
 
     // Update wind simulation
     this.wind.update(dt);
@@ -404,13 +419,29 @@ class Game {
 
     // ---- Ball has come to rest ----
     if (!ball.isMoving) {
-      // Trick-shot detection: 2+ wall bounces on a single shot
-      if (this.wallHitsThisShot >= 2) {
-        this.hud.showTrickShot();
+      // Fire trick-shot message the instant ball stops (only once)
+      if (!this._ballJustStopped) {
+        this._ballJustStopped = true;
+        if (this.wallHitsThisShot >= 2) this.hud.showTrickShot();
+        this.wallHitsThisShot = 0;
+        this.maverick.setState('idle');
       }
-      this.wallHitsThisShot = 0;
-      this.state = STATE.PLAYING;
-      this.maverick.setState('idle');
+
+      // Maverick walks toward the resting ball
+      const dx   = ball.x - this.maverickX;
+      const dy   = ball.y - this.maverickY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 3) {
+        const speed = 100; // px/s
+        this.maverickX += (dx / dist) * speed * dt;
+        this.maverickY += (dy / dist) * speed * dt;
+      } else {
+        // Arrived — snap to ball and hand control back to player
+        this.maverickX = ball.x;
+        this.maverickY = ball.y;
+        this._ballJustStopped = false;
+        this.state = STATE.PLAYING;
+      }
     }
 
     this.maverick.update(dt);
@@ -432,6 +463,7 @@ class Game {
     this.ball.launch(this.aimLine.angle, power);
     this.strokes++;
     this.wallHitsThisShot = 0;
+    this._ballJustStopped = false;
     this.wind.onShot();
     this.maverick.setState('swing');
     this.state = STATE.BALL_MOVING;
@@ -700,12 +732,18 @@ class Game {
     // Ball
     if (this.ball) this.ball.draw(ctx);
 
-    // Maverick character — offset behind the ball along the aim direction
+    // Maverick character — uses independent tracked position
     if (this.ball && this.maverick) {
-      const angle   = this.aimLine.angle;
-      const offsetX = -Math.cos(angle) * 14;
-      const offsetY = -Math.sin(angle) * 14;
-      this.maverick.draw(ctx, this.ball.x + offsetX, this.ball.y + offsetY, angle);
+      let drawAngle = this.aimLine.angle;
+      // While walking to the ball, face toward it
+      if (this.state === STATE.BALL_MOVING) {
+        const dx = this.ball.x - this.maverickX;
+        const dy = this.ball.y - this.maverickY;
+        if (Math.sqrt(dx * dx + dy * dy) > 2) {
+          drawAngle = Math.atan2(dy, dx);
+        }
+      }
+      this.maverick.draw(ctx, this.maverickX, this.maverickY, drawAngle);
     }
   }
 
@@ -733,8 +771,16 @@ class Game {
       activePowerups: this.activePowerups,
     }, this.wind);
 
-    // Wind / weather vane indicator in the bottom-left corner
-    this.wind.draw(ctx, 6, CANVAS.HEIGHT - 38, 30);
+    // Fast-forward indicator
+    if (this.state === STATE.BALL_MOVING && this.input.isDown('FAST')) {
+      ctx.fillStyle = 'rgba(10,10,10,0.75)';
+      ctx.fillRect(CANVAS.WIDTH - 30, 2, 28, 10);
+      ctx.fillStyle = COLORS.POWER_BAR_MAX;
+      ctx.font = 'bold 6px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('>> 3x', CANVAS.WIDTH - 16, 7);
+    }
   }
 }
 
