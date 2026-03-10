@@ -79,6 +79,22 @@ const STATE = {
   nearHK:              false,
 };
 
+// Soccer ball — sits at center of Caniglia Field, can be knocked by the car
+const SOCCER_FIELD = { fx1: 94, fy1: 45, fx2: 108, fy2: 61 }; // tile coords
+const soccerBall = {
+  x:  0, y:  0,   // world pixels — set by resetSoccerBall()
+  vx: 0, vy: 0,
+  radius: 16,
+};
+
+function resetSoccerBall() {
+  const TS = TILE_SIZE;
+  soccerBall.x  = ((SOCCER_FIELD.fx1 + SOCCER_FIELD.fx2) / 2) * TS;
+  soccerBall.y  = ((SOCCER_FIELD.fy1 + SOCCER_FIELD.fy2) / 2) * TS;
+  soccerBall.vx = 0;
+  soccerBall.vy = 0;
+}
+
 // ============================================================
 // [MAP]
 // ============================================================
@@ -903,6 +919,221 @@ function drawRoadMarkings() {
   }
 }
 
+function updateSoccerBall() {
+  if (CURRENT_MAP_NAME !== 'UNO Campus') return;
+
+  const TS = TILE_SIZE;
+  const R  = soccerBall.radius;
+
+  // Field wall boundaries (in world pixels, matching drawSoccerField)
+  const fx1 = SOCCER_FIELD.fx1 * TS;
+  const fy1 = SOCCER_FIELD.fy1 * TS;
+  const fx2 = SOCCER_FIELD.fx2 * TS;
+  const fy2 = SOCCER_FIELD.fy2 * TS;
+
+  // ── Car → ball collision ─────────────────────────────────
+  // Treat car as a circle (radius 22px) for simplicity
+  const CAR_R  = 22;
+  const dx     = soccerBall.x - car.x;
+  const dy     = soccerBall.y - car.y;
+  const distSq = dx * dx + dy * dy;
+  const minD   = CAR_R + R;
+
+  if (distSq < minD * minD && distSq > 0) {
+    const dist = Math.sqrt(distSq);
+    const nx   = dx / dist;
+    const ny   = dy / dist;
+
+    // Impulse based on car speed; preserve a bit of car lateral velocity
+    const carSpeed = Math.sqrt(car.vx * car.vx + car.vy * car.vy);
+    const impulse  = Math.max(carSpeed * 1.1, 2);
+    soccerBall.vx  = nx * impulse + car.vx * 0.25;
+    soccerBall.vy  = ny * impulse + car.vy * 0.25;
+
+    // Push ball out of overlap
+    soccerBall.x = car.x + nx * (minD + 1);
+    soccerBall.y = car.y + ny * (minD + 1);
+  }
+
+  // ── Physics ──────────────────────────────────────────────
+  soccerBall.vx *= 0.97;
+  soccerBall.vy *= 0.97;
+  soccerBall.x  += soccerBall.vx;
+  soccerBall.y  += soccerBall.vy;
+
+  // ── Boundary & goal collision ────────────────────────────
+  // Goal mouth: 4 tiles wide, 1 tile deep (matching drawSoccerField)
+  const fcx     = (fx1 + fx2) / 2;
+  const gHalfW  = 2 * TS;        // half of 4-tile goal width
+  const goalD   = TS;             // 1 tile deep
+  const gX1     = fcx - gHalfW;  // left post world-x
+  const gX2     = fcx + gHalfW;  // right post world-x
+  const topBack = fy1 - goalD;   // back of top goal
+  const botBack = fy2 + goalD;   // back of bottom goal
+
+  // Side walls — always solid
+  if (soccerBall.x - R < fx1) { soccerBall.x = fx1 + R; soccerBall.vx =  Math.abs(soccerBall.vx) * 0.55; }
+  if (soccerBall.x + R > fx2) { soccerBall.x = fx2 - R; soccerBall.vx = -Math.abs(soccerBall.vx) * 0.55; }
+
+  // Top edge: open in the goal mouth, solid elsewhere
+  if (soccerBall.y - R < fy1) {
+    const inMouth = soccerBall.x > gX1 && soccerBall.x < gX2;
+    if (!inMouth) {
+      soccerBall.y = fy1 + R; soccerBall.vy = Math.abs(soccerBall.vy) * 0.55;
+    } else {
+      // Inside top goal — bounce off posts and back net
+      if (soccerBall.x - R < gX1) { soccerBall.x = gX1 + R; soccerBall.vx =  Math.abs(soccerBall.vx) * 0.55; }
+      if (soccerBall.x + R > gX2) { soccerBall.x = gX2 - R; soccerBall.vx = -Math.abs(soccerBall.vx) * 0.55; }
+      if (soccerBall.y - R < topBack) { soccerBall.y = topBack + R; soccerBall.vy = Math.abs(soccerBall.vy) * 0.55; }
+    }
+  }
+
+  // Bottom edge: open in the goal mouth, solid elsewhere
+  if (soccerBall.y + R > fy2) {
+    const inMouth = soccerBall.x > gX1 && soccerBall.x < gX2;
+    if (!inMouth) {
+      soccerBall.y = fy2 - R; soccerBall.vy = -Math.abs(soccerBall.vy) * 0.55;
+    } else {
+      // Inside bottom goal — bounce off posts and back net
+      if (soccerBall.x - R < gX1) { soccerBall.x = gX1 + R; soccerBall.vx =  Math.abs(soccerBall.vx) * 0.55; }
+      if (soccerBall.x + R > gX2) { soccerBall.x = gX2 - R; soccerBall.vx = -Math.abs(soccerBall.vx) * 0.55; }
+      if (soccerBall.y + R > botBack) { soccerBall.y = botBack - R; soccerBall.vy = -Math.abs(soccerBall.vy) * 0.55; }
+    }
+  }
+}
+
+function drawSoccerBall() {
+  if (CURRENT_MAP_NAME !== 'UNO Campus') return;
+
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+  const sx = soccerBall.x - camera.x + halfW;
+  const sy = soccerBall.y - camera.y + halfH;
+  const R  = soccerBall.radius;
+
+  if (sx < -R * 3 || sx > canvas.width  + R * 3 ||
+      sy < -R * 3 || sy > canvas.height + R * 3) return;
+
+  ctx.save();
+
+  // White ball body
+  ctx.beginPath();
+  ctx.arc(sx, sy, R, 0, Math.PI * 2);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+  ctx.strokeStyle = '#1A1A1A';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Classic black pentagon patches (5 arms + center spot)
+  ctx.fillStyle   = '#1A1A1A';
+  ctx.strokeStyle = '#1A1A1A';
+  ctx.lineWidth   = 1;
+
+  // Center patch
+  ctx.beginPath();
+  ctx.arc(sx, sy, R * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Five outer patches connected by stitching lines
+  for (let i = 0; i < 5; i++) {
+    const angle = (i / 5) * Math.PI * 2 - Math.PI / 2;
+    const px = sx + Math.cos(angle) * R * 0.58;
+    const py = sy + Math.sin(angle) * R * 0.58;
+
+    ctx.beginPath();
+    ctx.arc(px, py, R * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(sx + Math.cos(angle) * R * 0.22, sy + Math.sin(angle) * R * 0.22);
+    ctx.lineTo(px, py);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawSoccerField() {
+  if (!MAP || CURRENT_MAP_NAME !== 'UNO Campus') return;
+
+  const halfW = canvas.width / 2;
+  const halfH = canvas.height / 2;
+  const TS = TILE_SIZE;
+
+  // Field boundary in world pixels — open grass between buildings
+  // Safe bounds: x=93 (east of H&K parking), x=108 (west of east building),
+  //              y=44 (south of upper H-road sidewalk at y=43), y=61 (clear of buildings)
+  const fx1 = 94 * TS;   // left edge   (1-tile buffer from H&K parking)
+  const fy1 = 45 * TS;   // top edge    (2-tile buffer from sidewalk at y=43)
+  const fx2 = 108 * TS;  // right edge  (east building starts at x=109)
+  const fy2 = 61 * TS;   // bottom edge (clear of all buildings)
+  const fw  = fx2 - fx1;
+  const fh  = fy2 - fy1;
+  const fcx = (fx1 + fx2) / 2;
+  const fcy = (fy1 + fy2) / 2;
+
+  // World → screen
+  const sx = wx => wx - camera.x + halfW;
+  const sy = wy => wy - camera.y + halfH;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.80)';
+  ctx.fillStyle   = 'rgba(255, 255, 255, 0.80)';
+  ctx.lineWidth   = 3;
+  ctx.lineJoin    = 'round';
+
+  // Outer boundary
+  ctx.strokeRect(sx(fx1), sy(fy1), fw, fh);
+
+  // Center line (horizontal, dividing field top/bottom)
+  ctx.beginPath();
+  ctx.moveTo(sx(fx1), sy(fcy));
+  ctx.lineTo(sx(fx2), sy(fcy));
+  ctx.stroke();
+
+  // Center circle (~2.5 tiles radius)
+  ctx.beginPath();
+  ctx.arc(sx(fcx), sy(fcy), 2.5 * TS, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Center spot
+  ctx.beginPath();
+  ctx.arc(sx(fcx), sy(fcy), 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Goal areas (6-tile wide, 2-tile deep boxes at each end)
+  const gaW = 6 * TS;
+  const gaD = 2 * TS;
+  const gaX1 = fcx - gaW / 2;
+  ctx.strokeRect(sx(gaX1), sy(fy1),       gaW,  gaD);  // top goal area
+  ctx.strokeRect(sx(gaX1), sy(fy2 - gaD), gaW,  gaD);  // bottom goal area
+
+  // Goals (4-tile wide, 1-tile deep, drawn outside the boundary)
+  const goalW = 4 * TS;
+  const goalD = TS;
+  const gX1 = fcx - goalW / 2;
+  const gX2 = fcx + goalW / 2;
+
+  // Top goal
+  ctx.beginPath();
+  ctx.moveTo(sx(gX1), sy(fy1));
+  ctx.lineTo(sx(gX1), sy(fy1 - goalD));
+  ctx.lineTo(sx(gX2), sy(fy1 - goalD));
+  ctx.lineTo(sx(gX2), sy(fy1));
+  ctx.stroke();
+
+  // Bottom goal
+  ctx.beginPath();
+  ctx.moveTo(sx(gX1), sy(fy2));
+  ctx.lineTo(sx(gX1), sy(fy2 + goalD));
+  ctx.lineTo(sx(gX2), sy(fy2 + goalD));
+  ctx.lineTo(sx(gX2), sy(fy2));
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawTireMarks() {
   if (tireMarks.length === 0) return;
   const halfW = canvas.width  / 2;
@@ -923,6 +1154,9 @@ function addTireMark(wx, wy) {
 
 function updateTireMarks() {
   if (!car.drifting) return;
+  // Suppress skid marks when reversing — slip angle is always huge going backwards
+  const fwd = car.vx * Math.cos(car.heading) + car.vy * Math.sin(car.heading);
+  if (fwd <= 0) return;
 
   const cos = Math.cos(car.heading);
   const sin = Math.sin(car.heading);
@@ -1082,6 +1316,10 @@ function render() {
 
   // 2. Parking lot stall lines (world-space overlay)
   drawParkingLotStalls();
+
+  // 2b. Soccer field markings — Caniglia Field
+  drawSoccerField();
+  drawSoccerBall();
 
   // 3. Tire marks (persistent)
   drawTireMarks();
@@ -1451,6 +1689,7 @@ function gameLoop() {
   updateCar(INPUT);
   updateScoring();
   updateTireMarks();
+  updateSoccerBall();
   updateNearbyBuilding();
   render();
   requestAnimationFrame(gameLoop);
@@ -1489,6 +1728,8 @@ function switchMap() {
 
   camera.x = car.x;
   camera.y = car.y;
+
+  resetSoccerBall();
 }
 
 function init() {
@@ -1517,6 +1758,8 @@ function init() {
 
   camera.x = car.x;
   camera.y = car.y;
+
+  resetSoccerBall();
 
   // allow toggling maps with 'M', and mini-golf nav with 'E'
   window.addEventListener('keydown', e => {
