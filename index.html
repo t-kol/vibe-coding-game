@@ -422,174 +422,52 @@ function buildElmwoodParkMap() {
 let tilesetCanvas = null;
 
 const TILEMAP = {
-  0:  { sx: 0,   sy: 0 },
-  1:  { sx: 64,  sy: 0 },
-  2:  { sx: 128, sy: 0 },
-  3:  { sx: 192, sy: 0 },
-  4:  { sx: 256, sy: 0 },
-  5:  { sx: 320, sy: 0 },
-  6:  { sx: 384, sy: 0 },
-  7:  { sx: 448, sy: 0 },
-  8:  { sx: 512, sy: 0 },
-  10: { sx: 576, sy: 0 },
+  0:  { sx: 0,   sy: 0   },  // VOID
+  1:  { sx: 64,  sy: 0   },  // ASPHALT
+  2:  { sx: 64,  sy: 64  },  // INTERSECTION
+  3:  { sx: 128, sy: 0   },  // SIDEWALK
+  4:  { sx: 192, sy: 0   },  // GRASS
+  5:  { sx: 128, sy: 64  },  // DIRT
+  6:  { sx: 192, sy: 64  },  // PARKING
+  7:  { sx: 0,   sy: 128 },  // BUILDING
+  8:  { sx: 0,   sy: 64  },  // TREE
+  10: { sx: 64,  sy: 128 },  // CURB
 };
 
-function buildTileset() {
-  tilesetCanvas = document.createElement('canvas');
-  tilesetCanvas.width = 1024;
-  tilesetCanvas.height = 256;
-  const c = tilesetCanvas.getContext('2d');
+function loadTileset(onLoaded) {
+  tilesetImage = new Image();
+  tilesetImage.onload = onLoaded;
+  tilesetImage.onerror = () => {
+    console.warn('map_tiles.png failed to load — falling back to procedural tiles');
+    tilesetImage = buildFallbackTileset();
+    onLoaded();
+  };
+  tilesetImage.src = 'assets/tiles/map_tiles.png';
+}
+
+// Fallback: draw tiles procedurally onto an offscreen canvas if the PNG is missing
+function buildFallbackTileset() {
+  const fb = document.createElement('canvas');
+  fb.width = 256; fb.height = 256;
+  const c = fb.getContext('2d');
   const S = TILE_SIZE;
-
-  function drawTile(id, drawFn) {
-    const { sx, sy } = TILEMAP[id];
-    c.save();
-    c.translate(sx, sy);
-    drawFn(c, S);
-    c.restore();
-  }
-
-  function noise(c, s, color, count) {
+  const tiles = [
+    [0,   0,   '#0A0A0A'],
+    [64,  0,   '#2C2C38'],
+    [128, 0,   '#C4B48C'],
+    [192, 0,   '#2E6A20'],
+    [0,   64,  '#184A10'],
+    [64,  64,  '#323244'],
+    [128, 64,  '#7A5A18'],
+    [192, 64,  '#383848'],
+    [0,   128, '#5A4A3C'],
+    [64,  128, '#909080'],
+  ];
+  for (const [x, y, color] of tiles) {
     c.fillStyle = color;
-    for (let i = 0; i < count; i++) {
-      c.fillRect(
-        Math.random() * s | 0,
-        Math.random() * s | 0,
-        2, 2
-      );
-    }
+    c.fillRect(x, y, S, S);
   }
-
-  // Void
-  drawTile(0, (c, s) => {
-    c.fillStyle = '#0A0A0A';
-    c.fillRect(0, 0, s, s);
-    noise(c, s, '#111', 6);
-  });
-
-  // Asphalt
-  drawTile(1, (c, s) => {
-    c.fillStyle = '#2C2C38';
-    c.fillRect(0, 0, s, s);
-    noise(c, s, '#353545', 20);
-    noise(c, s, '#222230', 15);
-  });
-
-  // Intersection
-  drawTile(2, (c, s) => {
-    c.fillStyle = '#323244';
-    c.fillRect(0, 0, s, s);
-    noise(c, s, '#3A3A50', 20);
-    // crosswalk stripes
-    c.fillStyle = '#EEEECC';
-    for (let i = 2; i < s; i += 10) {
-      c.fillRect(i, 4, 5, 6);
-      c.fillRect(i, s - 10, 5, 6);
-      c.fillRect(4, i, 6, 5);
-      c.fillRect(s - 10, i, 6, 5);
-    }
-  });
-
-  // Sidewalk
-  drawTile(3, (c, s) => {
-    c.fillStyle = '#C4B48C';
-    c.fillRect(0, 0, s, s);
-    noise(c, s, '#D0C09A', 18);
-    noise(c, s, '#B0A07A', 12);
-    // cracks
-    c.fillStyle = '#A09070';
-    c.fillRect(8, 0, 1, s);
-    c.fillRect(24, 0, 1, s);
-    c.fillRect(40, 0, 1, s);
-    c.fillRect(56, 0, 1, s);
-  });
-
-  // Grass
-  drawTile(4, (c, s) => {
-    c.fillStyle = '#2E6A20';
-    c.fillRect(0, 0, s, s);
-    noise(c, s, '#386828', 30);
-    noise(c, s, '#245018', 20);
-    noise(c, s, '#3A7A24', 15);
-  });
-
-  // Dirt Path
-  drawTile(5, (c, s) => {
-    c.fillStyle = '#7A5A18';
-    c.fillRect(0, 0, s, s);
-    noise(c, s, '#8B6820', 25);
-    noise(c, s, '#6A4C10', 18);
-    noise(c, s, '#9B7830', 10);
-  });
-
-  // Parking Lot
-  drawTile(6, (c, s) => {
-    c.fillStyle = '#383848';
-    c.fillRect(0, 0, s, s);
-    noise(c, s, '#404055', 15);
-    // parking stripes
-    c.fillStyle = '#DDDDBB';
-    c.fillRect(s / 2 - 1, 4, 2, s - 8);
-    c.fillRect(4, s / 2 - 1, s - 8, 2);
-  });
-
-  // Building
-  drawTile(7, (c, s) => {
-    c.fillStyle = '#5A4A3C';
-    c.fillRect(0, 0, s, s);
-    // shadow/border
-    c.fillStyle = '#3A2A1C';
-    c.fillRect(0, 0, s, 4);
-    c.fillRect(0, 0, 4, s);
-    // roof detail
-    c.fillStyle = '#6A5A4C';
-    c.fillRect(6, 6, s - 12, s - 12);
-    c.fillStyle = '#7A6A5C';
-    c.fillRect(10, 10, s - 20, s - 20);
-    // windows
-    c.fillStyle = '#AACCFF';
-    c.fillRect(14, 14, 8, 6);
-    c.fillRect(26, 14, 8, 6);
-    c.fillRect(38, 14, 8, 6);
-    c.fillRect(14, 28, 8, 6);
-    c.fillRect(26, 28, 8, 6);
-    c.fillRect(38, 28, 8, 6);
-    c.fillRect(14, 42, 8, 6);
-    c.fillRect(26, 42, 8, 6);
-    c.fillRect(38, 42, 8, 6);
-  });
-
-  // Tree Cluster
-  drawTile(8, (c, s) => {
-    c.fillStyle = '#184A10';
-    c.fillRect(0, 0, s, s);
-    // tree canopies
-    const trees = [[16,16,18],[48,12,14],[12,44,16],[44,44,12],[32,32,20]];
-    for (const [tx, ty, r] of trees) {
-      c.fillStyle = '#206010';
-      c.beginPath();
-      c.arc(tx, ty, r, 0, Math.PI * 2);
-      c.fill();
-      c.fillStyle = '#2A8018';
-      c.beginPath();
-      c.arc(tx - 3, ty - 3, r * 0.6, 0, Math.PI * 2);
-      c.fill();
-    }
-    noise(c, s, '#0A2808', 8);
-  });
-
-  // Curb (ID 10 → sx=576)
-  drawTile(10, (c, s) => {
-    c.fillStyle = '#909080';
-    c.fillRect(0, 0, s, s);
-    noise(c, s, '#A0A090', 15);
-    noise(c, s, '#7A7A6A', 10);
-    c.fillStyle = '#B0B0A0';
-    c.fillRect(0, 0, s, 3);
-    c.fillRect(0, s - 3, s, 3);
-    c.fillRect(0, 0, 3, s);
-    c.fillRect(s - 3, 0, 3, s);
-  });
+  return fb;
 }
 
 function getTileFriction(tileId) {
@@ -857,7 +735,7 @@ const MAX_TIRE_MARKS = 3000;
 let tireMarks = []; // [{x,y}]
 
 function drawTileGrid() {
-  if (!MAP || !tilesetCanvas) return;
+  if (!MAP || !tilesetImage) return;
 
   const halfW = canvas.width  / 2;
   const halfH = canvas.height / 2;
@@ -878,7 +756,7 @@ function drawTileGrid() {
       const screenY = ty * TILE_SIZE - camera.y + halfH;
 
       ctx.drawImage(
-        tilesetCanvas,
+        tilesetImage,
         tm.sx, tm.sy, TILE_SIZE, TILE_SIZE,
         screenX, screenY, TILE_SIZE, TILE_SIZE
       );
