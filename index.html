@@ -1290,6 +1290,13 @@ function updateNearbyBuilding() {
   STATE.nearHK = (CURRENT_MAP_NAME === 'UNO Campus') &&
                  (carTX >= 61 - HK_PAD && carTX <= 92 + HK_PAD &&
                   carTY >= 44 - HK_PAD && carTY <= 72 + HK_PAD);
+
+  // Force the building label to show H&K whenever the AABB is active,
+  // overriding the small-radius circle check above
+  if (STATE.nearHK) {
+    STATE.nearbyBuilding = 'H&K / Wellness Center';
+    STATE.nearbyBuildingAlpha = 1;
+  }
 }
 
 // ============================================================
