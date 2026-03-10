@@ -868,6 +868,9 @@ window.addEventListener('keydown', e => {
     case 'Escape':
       if (!gameStarted && helpModalOpen) { helpModalOpen = false; e.preventDefault(); }
       break;
+    case 'KeyM':
+      minimapExpanded = !minimapExpanded;
+      e.preventDefault(); break;
     case 'KeyP':
       sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
       window.location.href = 'Maverick-Mini-Golf/dist/index.html'; break;
@@ -923,6 +926,7 @@ let canvas, ctx;
 let tireCanvas, tireCtx;
 let camera = { x: 0, y: 0 };
 let minimapCanvas = null;
+let minimapExpanded = false;
 
 const MM_W = 175, MM_H = 125; // minimap pixel dimensions (1.25px per tile)
 
@@ -1626,8 +1630,137 @@ function drawHUD() {
   ctx.fillStyle = '#666666';
   ctx.font = '12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake — P: Mini-Golf', canvas.width / 2, canvas.height - 10);
+  ctx.fillText('W/A/S/D or Arrow Keys — SPACE: Handbrake — P: Mini-Golf — M: Map', canvas.width / 2, canvas.height - 10);
   ctx.textAlign = 'left';
+
+  // ── Expanded Map Overlay (M key) ────────────────────────────────
+  if (minimapExpanded && minimapCanvas && MAP) {
+    const MARGIN = 40;
+    const maxW = canvas.width  - MARGIN * 2;
+    const maxH = canvas.height - MARGIN * 2;
+    // Keep map aspect ratio
+    const aspect = MAP.width / MAP.height;
+    let ow = maxW, oh = maxW / aspect;
+    if (oh > maxH) { oh = maxH; ow = maxH * aspect; }
+    const ox = (canvas.width  - ow) / 2;
+    const oy = (canvas.height - oh) / 2;
+
+    // Dim background
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Panel
+    ctx.fillStyle = 'rgba(10,10,20,0.92)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 2;
+    ctx.fillRect(ox - 8, oy - 8, ow + 16, oh + 16 + 22);
+    ctx.strokeRect(ox - 8, oy - 8, ow + 16, oh + 16 + 22);
+
+    // Map image
+    ctx.drawImage(minimapCanvas, ox, oy, ow, oh);
+
+    // Car dot
+    const scaleX = ow / MAP.width;
+    const scaleY = oh / MAP.height;
+    const dotX = ox + (car.x / TILE_SIZE) * scaleX;
+    const dotY = oy + (car.y / TILE_SIZE) * scaleY;
+    ctx.fillStyle = '#FFDD00';
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 5, 0, Math.PI * 2);
+    ctx.fill();
+    // Direction indicator
+    ctx.strokeStyle = '#FFDD00';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(dotX, dotY);
+    ctx.lineTo(dotX + Math.cos(car.heading) * 12, dotY + Math.sin(car.heading) * 12);
+    ctx.stroke();
+
+    // Building name labels — with iterative overlap separation
+    if (CURRENT_MAP_NAME === 'UNO Campus') {
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      const PX = 6, LH = 18;
+
+      // Build label descriptors: anchor = building center, x/y = movable label center
+      const lbls = UNO_CAMPUS_BUILDINGS.map(b => {
+        const ax = ox + b.cx * scaleX;
+        const ay = oy + b.cy * scaleY;
+        return { name: b.name, ax, ay, x: ax, y: ay, w: ctx.measureText(b.name).width + PX * 2, h: LH };
+      });
+
+      // Iteratively push overlapping labels apart (60 passes)
+      for (let iter = 0; iter < 60; iter++) {
+        for (let i = 0; i < lbls.length; i++) {
+          for (let j = i + 1; j < lbls.length; j++) {
+            const a = lbls[i], b = lbls[j];
+            const overlapX = (a.w + b.w) / 2 + 4 - Math.abs(a.x - b.x);
+            const overlapY = (a.h + b.h) / 2 + 4 - Math.abs(a.y - b.y);
+            if (overlapX > 0 && overlapY > 0) {
+              // Push along the axis with less overlap (prefer vertical nudge for same-row clusters)
+              if (overlapX < overlapY) {
+                const push = overlapX / 2 + 1;
+                if (a.x <= b.x) { a.x -= push; b.x += push; }
+                else             { a.x += push; b.x -= push; }
+              } else {
+                const push = overlapY / 2 + 1;
+                if (a.y <= b.y) { a.y -= push; b.y += push; }
+                else             { a.y += push; b.y -= push; }
+              }
+            }
+          }
+        }
+      }
+
+      // Draw connector lines from label back to building anchor when displaced
+      ctx.lineWidth = 1;
+      for (const lb of lbls) {
+        if (Math.hypot(lb.x - lb.ax, lb.y - lb.ay) > 6) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+          ctx.beginPath();
+          ctx.moveTo(lb.ax, lb.ay);
+          ctx.lineTo(lb.x, lb.y);
+          ctx.stroke();
+        }
+        // Anchor dot on building center
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.beginPath();
+        ctx.arc(lb.ax, lb.ay, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Draw pills + text
+      for (const lb of lbls) {
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.beginPath();
+        ctx.roundRect(lb.x - lb.w / 2, lb.y - 13, lb.w, LH, 4);
+        ctx.fill();
+        ctx.shadowColor = '#000';
+        ctx.shadowBlur = 3;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(lb.name, lb.x, lb.y);
+        ctx.shadowBlur = 0;
+      }
+      ctx.textAlign = 'left';
+    }
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(ox, oy, ow, oh);
+
+    // Label
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    if (CURRENT_MAP_NAME) {
+      ctx.fillText(CURRENT_MAP_NAME.toUpperCase(), ox + ow / 2, oy + oh + 16);
+    }
+    ctx.fillStyle = '#555555';
+    ctx.font = '11px monospace';
+    ctx.fillText('press M to close', ox + ow / 2, oy + oh + 30);
+    ctx.textAlign = 'left';
+  }
 
   ctx.restore();
 }
