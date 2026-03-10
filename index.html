@@ -80,6 +80,19 @@ const STATE = {
   nearCaniggia:        false,
 };
 
+// ── Sinkhole ─────────────────────────────────────────────────────────────────
+// Trigger zone: bottom of the south road (tiles ~70-82, 90-96)
+const SINKHOLE = {
+  x1: 70 * 64, y1: 90 * 64,
+  x2: 82 * 64, y2: 96 * 64,
+  cx: 76 * 64, cy: 93 * 64,  // visual center of pit
+  phase:  'idle',  // 'idle' | 'warning' | 'falling' | 'respawn'
+  timer:  0,
+  WARN_FRAMES:    150,  // ~2.5 sec of blinking before road vanishes
+  FALL_FRAMES:    80,   // ~1.3 sec fall animation
+  RESPAWN_FRAMES: 50,   // ~0.83 sec black screen before respawn
+};
+
 // ── Donut smoke ──────────────────────────────────────────────────────────────
 // Tracks accumulated yaw while continuously drifting forward.
 // After 3 full circles (6π rad) smoke particles are emitted at the car's world
@@ -159,6 +172,111 @@ function drawSmoke() {
     ctx.fillStyle = g;
     ctx.fill();
   }
+  ctx.restore();
+}
+
+// ============================================================
+// [SINKHOLE UPDATE + DRAW]
+// ============================================================
+function updateSinkhole() {
+  if (SINKHOLE.phase === 'idle') {
+    if (car.x >= SINKHOLE.x1 && car.x <= SINKHOLE.x2 &&
+        car.y >= SINKHOLE.y1 && car.y <= SINKHOLE.y2) {
+      SINKHOLE.phase = 'warning';
+      SINKHOLE.timer = 0;
+    }
+    return;
+  }
+
+  SINKHOLE.timer++;
+
+  if (SINKHOLE.phase === 'warning') {
+    if (SINKHOLE.timer >= SINKHOLE.WARN_FRAMES) {
+      SINKHOLE.phase = 'falling';
+      SINKHOLE.timer = 0;
+    }
+    return;
+  }
+
+  if (SINKHOLE.phase === 'falling') {
+    if (SINKHOLE.timer >= SINKHOLE.FALL_FRAMES) {
+      SINKHOLE.phase = 'respawn';
+      SINKHOLE.timer = 0;
+    }
+    return;
+  }
+
+  if (SINKHOLE.phase === 'respawn') {
+    if (SINKHOLE.timer >= SINKHOLE.RESPAWN_FRAMES) {
+      car.x = (12 + 0.5) * TILE_SIZE;
+      car.y = (5  + 0.5) * TILE_SIZE;
+      car.heading = 0;
+      car.vx = 0; car.vy = 0;
+      car.speed = 0;
+      car.yawRate = 0;
+      car.steerAngle = 0;
+      camera.x = car.x;
+      camera.y = car.y;
+      SINKHOLE.phase = 'idle';
+      SINKHOLE.timer = 0;
+    }
+  }
+}
+
+function drawSinkhole() {
+  if (SINKHOLE.phase === 'idle') return;
+
+  const halfW = canvas.width  / 2;
+  const halfH = canvas.height / 2;
+  const cx = SINKHOLE.cx - camera.x + halfW;
+  const cy = SINKHOLE.cy - camera.y + halfH;
+  const zoneW = SINKHOLE.x2 - SINKHOLE.x1;
+  const zoneH = SINKHOLE.y2 - SINKHOLE.y1;
+
+  if (SINKHOLE.phase === 'warning') {
+    // Flash orange/red over the road section every 8 frames
+    const blink = Math.floor(SINKHOLE.timer / 8) % 2 === 0;
+    if (blink) {
+      ctx.save();
+      // Urgency increases as timer runs out — more opaque near the end
+      const urgency = SINKHOLE.timer / SINKHOLE.WARN_FRAMES;
+      const alpha = 0.5 + urgency * 0.35;
+      ctx.fillStyle = `rgba(255, ${Math.round(120 - urgency * 100)}, 0, ${alpha.toFixed(2)})`;
+      const rx = SINKHOLE.x1 - camera.x + halfW;
+      const ry = SINKHOLE.y1 - camera.y + halfH;
+      ctx.fillRect(rx, ry, zoneW, zoneH);
+      ctx.restore();
+    }
+    return;
+  }
+
+  // 'falling' or 'respawn' — draw the dark pit
+  ctx.save();
+  const radW = zoneW * 0.48;
+  const radH = zoneH * 0.44;
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(radW, radH));
+  grad.addColorStop(0,   'rgba(0,0,0,0.97)');
+  grad.addColorStop(0.55,'rgba(15,8,0,0.88)');
+  grad.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, radW, radH, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Dark ring edge
+  ctx.strokeStyle = 'rgba(60,40,10,0.6)';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, radW, radH, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Respawn: fade the screen to black over RESPAWN_FRAMES
+  if (SINKHOLE.phase === 'respawn') {
+    const t = SINKHOLE.timer / SINKHOLE.RESPAWN_FRAMES;
+    ctx.fillStyle = `rgba(0,0,0,${(t * 0.95).toFixed(3)})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
   ctx.restore();
 }
 
@@ -618,6 +736,12 @@ function computeRearGrip(absSlipAngle, handbrake) {
 }
 
 function updateCar(input) {
+  // Freeze physics while car is falling or respawning
+  if (SINKHOLE.phase === 'falling' || SINKHOLE.phase === 'respawn') {
+    car.vx = 0; car.vy = 0; car.speed = 0; car.yawRate = 0;
+    return;
+  }
+
   const throttle  = input.up   ? 1 : (input.down  ? -1 : 0);
   const steerDir  = input.left ? -1 : (input.right ?  1 : 0);
   const handbrake = input.handbrake;
@@ -1182,16 +1306,29 @@ const CAR_PALETTE_DRIFT = {
 };
 
 function drawCar() {
+  if (SINKHOLE.phase === 'respawn') return; // invisible while respawning
+
   const pal = CAR_PALETTE_NORMAL;
   const halfW = canvas.width  / 2;
   const halfH = canvas.height / 2;
   const sx = car.x - camera.x + halfW;
   const sy = car.y - camera.y + halfH;
 
+  // Fall animation: shrink and spin into the pit
+  let carScale = 1;
+  let extraSpin = 0;
+  if (SINKHOLE.phase === 'falling') {
+    const t = SINKHOLE.timer / SINKHOLE.FALL_FRAMES;
+    carScale  = Math.max(0, 1 - t);
+    extraSpin = t * Math.PI * 4; // 2 extra full rotations on the way down
+  }
+  if (carScale <= 0) return;
+
   ctx.save();
   ctx.translate(sx, sy);
   // +PI/2 aligns the sprite (front = local -y) to the physics (heading=0 → east/+x)
-  ctx.rotate(car.heading + Math.PI / 2);
+  ctx.rotate(car.heading + Math.PI / 2 + extraSpin);
+  ctx.scale(carScale, carScale);
 
   const S = 3; // scale factor: 1 virtual unit = 3px
   const W = 12 * S; // 36px
@@ -1313,6 +1450,9 @@ function render() {
 
   // 3. Road markings
   drawRoadMarkings();
+
+  // 3b. Sinkhole overlay (warning flash / pit)
+  drawSinkhole();
 
   // 4. Car
   drawCar();
@@ -1871,6 +2011,7 @@ function gameLoop() {
     return;
   }
   STATE.frame++;
+  updateSinkhole();
   updateCar(INPUT);
   updateScoring();
   updateTireMarks();

@@ -30,7 +30,10 @@ for (let row = 0; row < 3; row++)
 
 // Input
 const keys = {}, jp = {};
-document.addEventListener('keydown', e => { if (!keys[e.code]) jp[e.code] = true; keys[e.code] = true; e.preventDefault(); });
+document.addEventListener('keydown', e => {
+  if (e.code === 'Escape') { window.location.href = '../index.html'; return; }
+  if (!keys[e.code]) jp[e.code] = true; keys[e.code] = true; e.preventDefault();
+});
 document.addEventListener('keyup',  e => { keys[e.code] = false; });
 function pop(code) { const v = !!jp[code]; jp[code] = false; return v; }
 function clearJP() { Object.keys(jp).forEach(k => { jp[k] = false; }); }
