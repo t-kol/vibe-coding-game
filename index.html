@@ -731,8 +731,22 @@ window.addEventListener('keydown', e => {
     case 'KeyS': case 'ArrowDown':  INPUT.down      = true; break;
     case 'KeyA': case 'ArrowLeft':  INPUT.left      = true; break;
     case 'KeyD': case 'ArrowRight': INPUT.right     = true; break;
-    case 'Space':                   INPUT.handbrake = true;
+    case 'Space':
+      if (!gameStarted) {
+        helpModalOpen = false;
+        gameStarted = true;
+        document.getElementById('bgm').play().catch(() => {});
+        e.preventDefault();
+        break;
+      }
+      INPUT.handbrake = true;
       e.preventDefault(); break;
+    case 'KeyH':
+      if (!gameStarted) { helpModalOpen = !helpModalOpen; e.preventDefault(); }
+      break;
+    case 'Escape':
+      if (!gameStarted && helpModalOpen) { helpModalOpen = false; e.preventDefault(); }
+      break;
     case 'KeyP':
       window.location.href = 'Maverick-Mini-Golf/dist/index.html'; break;
   }
@@ -1275,9 +1289,164 @@ function updateNearbyBuilding() {
 }
 
 // ============================================================
+// [START SCREEN]
+// ============================================================
+let gameStarted    = false;
+let startScreenImg = null;
+let helpModalOpen  = false;
+
+function drawStartScreen() {
+  // Fill with black to create letterbox/pillarbox bars
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Fit image inside canvas while preserving aspect ratio
+  const imgW = startScreenImg.naturalWidth  || startScreenImg.width;
+  const imgH = startScreenImg.naturalHeight || startScreenImg.height;
+  const scale = Math.min(canvas.width / imgW, canvas.height / imgH);
+  const drawW = imgW * scale;
+  const drawH = imgH * scale;
+  const drawX = (canvas.width  - drawW) / 2;
+  const drawY = (canvas.height - drawH) / 2;
+
+  ctx.drawImage(startScreenImg, drawX, drawY, drawW, drawH);
+
+  // prompt label — positioned relative to the drawn image
+  const labelText = 'press space to begin  |  H for help';
+  const fontSize  = Math.max(16, Math.floor(drawH * 0.032));
+  ctx.font        = `${fontSize}px sans-serif`;
+  ctx.textAlign   = 'center';
+  ctx.textBaseline = 'middle';
+
+  const x = drawX + drawW / 2;
+  const y = drawY + drawH * 0.88;
+
+  // subtle dark backing
+  const tw = ctx.measureText(labelText).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(x - tw / 2 - 12, y - fontSize * 0.7, tw + 24, fontSize * 1.4);
+
+  ctx.fillStyle = '#cccccc';
+  ctx.fillText(labelText, x, y);
+}
+
+function drawHelpModal() {
+  const PW = Math.min(560, canvas.width  - 48);
+  const PH = Math.min(480, canvas.height - 48);
+  const PX = (canvas.width  - PW) / 2;
+  const PY = (canvas.height - PH) / 2;
+  const PAD = 24;
+
+  // dim backdrop
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // panel
+  ctx.fillStyle = '#0d0d18';
+  ctx.fillRect(PX, PY, PW, PH);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(PX, PY, PW, PH);
+
+  ctx.save();
+  ctx.textBaseline = 'top';
+
+  // title
+  ctx.fillStyle = '#FFDD00';
+  ctx.font = 'bold 20px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('ELMWOOD DRIFT', PX + PW / 2, PY + PAD);
+
+  ctx.textAlign = 'left';
+  let cy = PY + PAD + 32;
+  const col1 = PX + PAD;
+  const col2 = PX + PW / 2 + 8;
+  const lineH = 22;
+
+  function heading(text, x, y) {
+    ctx.fillStyle = '#888888';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText(text.toUpperCase(), x, y);
+  }
+  function row(label, value, x, y) {
+    ctx.fillStyle = '#FFDD00';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(label, x, y);
+    ctx.fillStyle = '#cccccc';
+    ctx.font = '13px monospace';
+    ctx.fillText(value, x + 110, y);
+  }
+
+  // ── Controls (left column) ──────────────────────────────
+  heading('Controls', col1, cy);
+  cy += lineH - 4;
+  row('W / ↑',     'Accelerate',    col1, cy); cy += lineH;
+  row('S / ↓',     'Brake / Reverse', col1, cy); cy += lineH;
+  row('A / ←',     'Steer left',    col1, cy); cy += lineH;
+  row('D / →',     'Steer right',   col1, cy); cy += lineH;
+  row('SPACE',      'Handbrake',     col1, cy); cy += lineH;
+  row('M',          'Switch map',    col1, cy); cy += lineH;
+  row('P',          'Mini-Golf',     col1, cy); cy += lineH;
+  row('H',          'Toggle help',   col1, cy);
+
+  // ── Scoring (right column, aligned to top) ──────────────
+  let cy2 = PY + PAD + 32;
+  heading('Scoring', col2, cy2);
+  cy2 += lineH - 4;
+
+  const notes = [
+    ['Drift',    'Slide your rear wheels to\nearn points every frame.'],
+    ['Angle',    'Bigger slip angle = faster\npoint gain.'],
+    ['Combo',    'Chain drifts within 90\nframes for a multiplier\n(up to x8).'],
+    ['Speed',    'You must be moving forward\nwhile drifting to score.'],
+  ];
+
+  ctx.font = 'bold 13px monospace';
+  for (const [label, note] of notes) {
+    ctx.fillStyle = '#FFDD00';
+    ctx.fillText(label, col2, cy2);
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '12px monospace';
+    const lines = note.split('\n');
+    let ly = cy2 + 16;
+    for (const l of lines) { ctx.fillText(l, col2, ly); ly += 16; }
+    cy2 += 16 + lines.length * 16 + 6;
+    ctx.font = 'bold 13px monospace';
+  }
+
+  // ── Locations ───────────────────────────────────────────
+  cy += lineH + 8;
+  heading('Locations (UNO Campus)', col1, cy);
+  cy += lineH - 4;
+  ctx.fillStyle = '#aaaaaa';
+  ctx.font = '12px monospace';
+  const locLines = [
+    'Drive near Thompson Alumni Center → press E',
+    '  to launch Maverick Mini Golf.',
+    'Drive near H&K / Wellness Center → press E',
+    '  to launch Maverick Climb.',
+  ];
+  for (const l of locLines) { ctx.fillText(l, col1, cy); cy += 16; }
+
+  // dismiss hint
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('press H or ESC to close', PX + PW / 2, PY + PH - 20);
+
+  ctx.restore();
+}
+
+// ============================================================
 // [LOOP]
 // ============================================================
 function gameLoop() {
+  if (!gameStarted) {
+    drawStartScreen();
+    if (helpModalOpen) drawHelpModal();
+    requestAnimationFrame(gameLoop);
+    return;
+  }
   STATE.frame++;
   updateCar(INPUT);
   updateScoring();
@@ -1360,20 +1529,15 @@ function init() {
     }
   });
 
-  // Start BGM on first user interaction (browser autoplay policy)
-  const bgm = document.getElementById('bgm');
-  bgm.volume = 0.5;
-  const startBGM = () => {
-    bgm.play().catch(() => {});
-    window.removeEventListener('keydown', startBGM);
-    window.removeEventListener('pointerdown', startBGM);
-  };
-  window.addEventListener('keydown', startBGM);
-  window.addEventListener('pointerdown', startBGM);
+  // BGM volume (play triggered by Space on start screen)
+  document.getElementById('bgm').volume = 0.5;
 
-  // load tileset then start game loop
+  // load tileset + start screen image, then kick off the loop
   loadTileset(() => {
-    requestAnimationFrame(gameLoop);
+    startScreenImg = new Image();
+    startScreenImg.onload  = () => requestAnimationFrame(gameLoop);
+    startScreenImg.onerror = () => { gameStarted = true; requestAnimationFrame(gameLoop); };
+    startScreenImg.src = 'assets/start-screen.png';
   });
 }
 

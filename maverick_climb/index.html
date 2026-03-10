@@ -10,8 +10,8 @@
 <script src="game.js"></script>
 <script>
   window.addEventListener('keydown', function(e) {
-    if (e.code === 'KeyP') window.location.href = '../index.html';
-  });
+    if (e.code === 'KeyP' || e.code === 'Escape') { e.stopImmediatePropagation(); history.back(); }
+  }, { capture: true });
 </script>
 </body>
 </html>
