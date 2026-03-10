@@ -77,6 +77,7 @@ const STATE = {
   nearbyBuildingAlpha: 0,
   nearThompson:        false,
   nearHK:              false,
+  nearCaniggia:        false,
 };
 
 // ── Donut smoke ──────────────────────────────────────────────────────────────
@@ -1415,7 +1416,7 @@ function drawHUD() {
     const tw = ctx.measureText(STATE.nearbyBuilding).width;
     const lx = canvas.width / 2;
     // Shift up when a minigame prompt is also visible so both can be seen
-    const ly = (STATE.nearHK || STATE.nearThompson) ? canvas.height - 116 : canvas.height - 52;
+    const ly = (STATE.nearHK || STATE.nearThompson || STATE.nearCaniggia) ? canvas.height - 116 : canvas.height - 52;
     ctx.fillStyle = 'rgba(0,0,20,0.82)';
     ctx.fillRect(lx - tw / 2 - 14, ly - 20, tw + 28, 28);
     ctx.fillStyle = '#E8D080';
@@ -1446,6 +1447,24 @@ function drawHUD() {
   // ── H&K / Wellness Center — climb game prompt ─────────────────
   if (STATE.nearHK) {
     const promptText = '[E]  Maverick Climb';
+    ctx.font = 'bold 15px monospace';
+    const pw = ctx.measureText(promptText).width;
+    const px2 = canvas.width / 2;
+    const py2 = canvas.height - 80;
+    ctx.fillStyle = 'rgba(0,0,20,0.85)';
+    ctx.fillRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.strokeStyle = '#FFDD00';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px2 - pw / 2 - 16, py2 - 22, pw + 32, 32);
+    ctx.fillStyle = '#FFDD00';
+    ctx.textAlign = 'center';
+    ctx.fillText(promptText, px2, py2);
+    ctx.textAlign = 'left';
+  }
+
+  // ── Caniglia Field — penalty shootout prompt ───────────────────
+  if (STATE.nearCaniggia) {
+    const promptText = '[E]  Maverick Penalty Shootout';
     ctx.font = 'bold 15px monospace';
     const pw = ctx.measureText(promptText).width;
     const px2 = canvas.width / 2;
@@ -1507,16 +1526,29 @@ function updateNearbyBuilding() {
 
   // H&K / Wellness Center proximity — enables E-key climb game nav
   // Building is L-shaped: vertical arm x=61–72 y=44–72, foot x=73–92 y=62–72
-  // Use a padded AABB so the player can trigger from anywhere near the building
+  // Right boundary capped at x=93 to avoid overlapping Caniglia Field (starts at x=94)
   const HK_PAD = 6;
   STATE.nearHK = (CURRENT_MAP_NAME === 'UNO Campus') &&
-                 (carTX >= 61 - HK_PAD && carTX <= 92 + HK_PAD &&
+                 (carTX >= 61 - HK_PAD && carTX <= 93 &&
                   carTY >= 44 - HK_PAD && carTY <= 72 + HK_PAD);
 
   // Force the building label to show H&K whenever the AABB is active,
   // overriding the small-radius circle check above
   if (STATE.nearHK) {
     STATE.nearbyBuilding = 'H&K / Wellness Center';
+    STATE.nearbyBuildingAlpha = 1;
+  }
+
+  // Caniglia Field proximity — enables E-key penalty shootout nav
+  // Field tiles: x=94–108, y=45–61. Left boundary starts at 94 (no overlap with H&K).
+  const CANIGGIA_PAD = 4;
+  STATE.nearCaniggia = (CURRENT_MAP_NAME === 'UNO Campus') &&
+                       (carTX >= 94 && carTX <= 108 + CANIGGIA_PAD &&
+                        carTY >= 45 - CANIGGIA_PAD && carTY <= 61 + CANIGGIA_PAD);
+
+  // Force the building label to show Caniglia Field whenever the AABB is active
+  if (STATE.nearCaniggia) {
+    STATE.nearbyBuilding = 'Caniglia Field';
     STATE.nearbyBuildingAlpha = 1;
   }
 }
@@ -1672,8 +1704,9 @@ function drawHelpModal() {
   ctx.font = '13px monospace';
 
   const locations = [
-    { label: 'Thompson Alumni Center', action: 'press E  →  Maverick Mini Golf' },
-    { label: 'H&K / Wellness Center',  action: 'press E  →  Maverick Climb'    },
+    { label: 'Thompson Alumni Center', action: 'press E  →  Maverick Mini Golf'         },
+    { label: 'H&K / Wellness Center',  action: 'press E  →  Maverick Climb'             },
+    { label: 'Caniglia Field',         action: 'press E  →  Maverick Penalty Shootout'  },
   ];
   for (const loc of locations) {
     ctx.fillStyle = '#FFDD00';
@@ -1769,6 +1802,9 @@ function init() {
       } else if (STATE.nearHK) {
         sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
         window.location.href = 'maverick_climb/index.html';
+      } else if (STATE.nearCaniggia) {
+        sessionStorage.setItem('minigameReturn', JSON.stringify({ x: car.x, y: car.y, heading: car.heading }));
+        window.location.href = 'maverick_penalty_shootout/index.html';
       }
     }
   });
