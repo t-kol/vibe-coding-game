@@ -1,4 +1,4 @@
-import { COLORS, CANVAS, SCORE_NAMES, GRADE_THRESHOLDS } from '../Constants.js';
+import { COLORS, CANVAS, SCORE_NAMES } from '../Constants.js';
 
 // Grade colors
 const GRADE_COLORS = {
@@ -130,12 +130,13 @@ export class Scoreboard {
 
     const diff       = (this.data.strokes || 0) - (this.data.par || 0);
     const termName   = this._getScoreTerm(this.data.strokes, this.data.par);
-    const scoreColor = diff < 0 ? '#7EC882' : diff > 0 ? '#FF6666' : COLORS.GOLD;
+    // Inverted: under par = red (bad/lose), over par = green (good/win)
+    const scoreColor = diff < 0 ? '#FF6666' : diff > 0 ? '#7EC882' : COLORS.GOLD;
     const scoreStr   = diff === 0 ? 'E' : diff > 0 ? `+${diff}` : `${diff}`;
     rows.push({ label: 'SCORE', value: `${scoreStr}  ${termName.toUpperCase()}`, color: scoreColor });
 
     const totalOver = (this.data.totalStrokes || 0) - (this.data.totalPar || 0);
-    const totalCol  = totalOver < 0 ? '#7EC882' : totalOver > 0 ? '#FF6666' : COLORS.HUD_DIM;
+    const totalCol  = totalOver < 0 ? '#FF6666' : totalOver > 0 ? '#7EC882' : COLORS.HUD_DIM;
     const totalStr  = totalOver === 0 ? 'E' : totalOver > 0 ? `+${totalOver}` : `${totalOver}`;
     rows.push({ label: 'RUNNING TOTAL', value: `${this.data.totalStrokes || 0}  (${totalStr})`, color: totalCol });
 
@@ -270,10 +271,11 @@ export class Scoreboard {
       ctx.fillRect(tableX, ry, CANVAS.WIDTH - 8, rowH);
 
       const diff     = (row.strokes || 0) - (row.par || 0);
-      const rowColor = diff < -1 ? COLORS.GOLD
-                    : diff === -1 ? '#7EC882'
-                    : diff === 0  ? COLORS.HUD_TEXT
-                    : diff === 1  ? '#FFB347'
+      // Inverted scoring: over par = good (green), under par = bad (red)
+      const rowColor = diff > 1  ? COLORS.GOLD
+                    : diff === 1 ? '#7EC882'
+                    : diff === 0 ? COLORS.HUD_TEXT
+                    : diff === -1 ? '#FFB347'
                     : '#FF6666';
       const diffStr  = diff === 0 ? 'E' : diff > 0 ? `+${diff}` : `${diff}`;
 
@@ -305,7 +307,8 @@ export class Scoreboard {
       ctx.fillRect(tableX, totalY, CANVAS.WIDTH - 8, rowH + 1);
 
       const overPar   = (this.data.totalStrokes || 0) - (this.data.totalPar || 0);
-      const totalColor = overPar < 0 ? '#7EC882' : overPar > 0 ? '#FF6666' : COLORS.GOLD;
+      // Inverted: under par = red (lose), over par = green (win)
+      const totalColor = overPar < 0 ? '#FF6666' : overPar > 0 ? '#7EC882' : COLORS.GOLD;
       const totalDiff  = overPar === 0 ? 'E' : overPar > 0 ? `+${overPar}` : `${overPar}`;
 
       ctx.fillStyle = COLORS.UNO_WHITE;
@@ -321,12 +324,13 @@ export class Scoreboard {
     // ---- Congratulatory message ----
     if (this.revealed.length >= scores.length + 1) {
       const grade  = this._getGrade(this.data.totalStrokes || 0, this.data.totalPar || 0);
+      // Inverted scoring: over par = win, under par = lose
       const congrats = {
-        S: 'LEGENDARY! ALL-AMERICAN GOLFER!',
-        A: 'EXCELLENT ROUND, MAVERICK!',
-        B: 'SOLID GAME AT ELMWOOD PARK!',
-        C: 'RESPECTABLE EFFORT!',
-        D: 'KEEP PRACTICING, COWBOY!',
+        S: 'INCREDIBLE! WAY OVER PAR — YOU WIN!',
+        A: 'GREAT WORK! SAFELY OVER PAR!',
+        B: 'AT PAR — JUST SCRAPED A WIN!',
+        C: 'UNDER PAR — SO CLOSE! YOU LOSE!',
+        D: 'WAY UNDER PAR — YOU LOSE, COWBOY!',
       };
       const msg = congrats[grade] || 'ROUND COMPLETE!';
       ctx.fillStyle = gradeColor;
@@ -355,10 +359,12 @@ export class Scoreboard {
   }
 
   _getGrade(totalStrokes, totalPar) {
+    // Inverted: more strokes over par = better grade
     const overPar = totalStrokes - totalPar;
-    for (const { label, maxOverPar } of GRADE_THRESHOLDS) {
-      if (overPar <= maxOverPar) return label;
-    }
+    if (overPar >=  5) return 'S';
+    if (overPar >=  2) return 'A';
+    if (overPar >=  0) return 'B';
+    if (overPar >= -3) return 'C';
     return 'D';
   }
 }

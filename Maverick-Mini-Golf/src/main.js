@@ -25,6 +25,7 @@ import { HUD }         from './ui/HUD.js';
 import { Scoreboard }  from './ui/Scoreboard.js';
 import { Leaderboard } from './ui/Leaderboard.js';
 import { HoleIntro }   from './ui/HoleIntro.js';
+import { SoundManager } from './engine/SoundManager.js';
 
 // ============================================================
 
@@ -37,6 +38,7 @@ class Game {
     this.renderer    = new Renderer(canvasEl);
     this.input       = new Input(canvasEl);
     this.holeManager = new HoleManager();
+    this.sfx         = new SoundManager();
 
     // ---- Global game state ----
     this.state       = STATE.MENU;
@@ -65,6 +67,7 @@ class Game {
 
     // ---- Trick-shot tracking ----
     this.wallHitsThisShot = 0;
+    this._prevWallHits    = 0; // for per-bounce SFX detection
 
     // ---- UI instances ----
     this.menu        = new Menu();
@@ -233,6 +236,12 @@ class Game {
     // Keep input aware of the current CSS↔canvas scale factor
     this.input.setScale(this.renderer.scale);
 
+    // Mute toggle — ESC key
+    if (this.input.justPressed('ESC')) {
+      this.sfx.toggle();
+      if (this.sfx.muted) this.sfx.stopRolling();
+    }
+
     switch (this.state) {
       case STATE.MENU:
       case STATE.MODE_SELECT:
@@ -362,6 +371,16 @@ class Game {
       this.wallHitsThisShot = ball.totalWallHits;
     }
 
+    // Wall-bounce SFX — fire once per new hit
+    if (ball.totalWallHits > this._prevWallHits) {
+      this._prevWallHits = ball.totalWallHits;
+      this.sfx.wallBounce();
+    }
+
+    // Update rolling pitch with current ball speed
+    const spd = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+    this.sfx.setRollSpeed(spd);
+
     // Update all entities
     for (const ent of this.entities) {
       if (ent) ent.update(dt);
@@ -380,6 +399,8 @@ class Game {
         )) {
           ent.deflectBall(ball);
           ball.isMoving = true; // ensure ball keeps simulating after deflect
+          if (ent instanceof Bison)    this.sfx.bison();
+          else if (ent instanceof Train) this.sfx.trainWhistle();
         }
       }
     }
@@ -397,12 +418,15 @@ class Game {
 
     // ---- Handle ball physics events ----
     if (result.event === 'cup') {
+      this.sfx.stopRolling();
       this._onHoleComplete();
       return;
     }
 
     if (result.event === 'water' || result.event === 'oob') {
       // Penalty stroke + reset
+      this.sfx.waterSplash();
+      this.sfx.penalty();
       this.hud.showMessage('+1 Stroke Penalty', 1.5, COLORS.WATER);
       this.hud.addScorePopup('+1', ball.x, ball.y, COLORS.WATER);
       this.strokes++;
@@ -422,7 +446,11 @@ class Game {
       // Fire trick-shot message the instant ball stops (only once)
       if (!this._ballJustStopped) {
         this._ballJustStopped = true;
-        if (this.wallHitsThisShot >= 2) this.hud.showTrickShot();
+        this.sfx.stopRolling();
+        if (this.wallHitsThisShot >= 2) {
+          this.hud.showTrickShot();
+          this.sfx.trickShot();
+        }
         this.wallHitsThisShot = 0;
         this.maverick.setState('idle');
       }
@@ -463,10 +491,13 @@ class Game {
     this.ball.launch(this.aimLine.angle, power);
     this.strokes++;
     this.wallHitsThisShot = 0;
+    this._prevWallHits    = 0;
     this._ballJustStopped = false;
     this.wind.onShot();
     this.maverick.setState('swing');
     this.state = STATE.BALL_MOVING;
+    this.sfx.swing();
+    this.sfx.startRolling();
 
     // Consume WHIRLWIND power-up: double speed this shot
     if (this.activePowerups.includes(POWERUP.WHIRLWIND)) {
@@ -499,6 +530,8 @@ class Game {
     this.lastBallPos = null;
     this.lastBallVel = null;
 
+    this.sfx.stopRolling();
+    this.sfx.mulligan();
     this.hud.showMessage('MULLIGAN!', 1.5, COLORS.GOLD);
     this.state = STATE.PLAYING;
     this.maverick.setState('idle');
@@ -509,6 +542,7 @@ class Game {
   // ----------------------------------------------------------
 
   _applyPowerup(type) {
+    this.sfx.powerupCollect();
     switch (type) {
       case POWERUP.COWBOY_HAT:
         // Ghost mode: ball passes through solid obstacles for one shot
@@ -563,21 +597,23 @@ class Game {
 
     const par = holeData.par;
 
-    // Maverick reaction
+    // Maverick reaction — under par = bad (lose), at/over par = good (win)
     if (this.strokes === 1) {
       this.hud.showHoleInOne();
-      this.maverick.setState('celebrate');
+      this.sfx.holeInOne();
+      this.maverick.setState('frustrated'); // hole-in-one = way under par = bad
     } else if (this.strokes < par) {
-      this.maverick.setState('celebrate');
-    } else if (this.strokes > par + 1) {
-      this.maverick.setState('frustrated');
-    } else {
-      this.maverick.setState('idle');
+      this.sfx.cupIn();
+      this.maverick.setState('frustrated'); // under par = losing condition
+    } else if (this.strokes >= par) {
+      this.sfx.cupIn();
+      this.maverick.setState('celebrate'); // at or over par = winning condition
     }
 
     // Special: goal horn for hole 4 (arena theme) when ≤ 2 strokes
     if (this.currentHole === 4 && this.strokes <= 2) {
       this.hud.showGoalHorn();
+      this.sfx.goalHorn();
     }
 
     // Record score
@@ -611,16 +647,19 @@ class Game {
       .reduce((acc, h) => acc + h.par, 0);
     const overPar = totalStrokes - totalPar;
 
-    // Letter grade
+    // Letter grade — inverted: more strokes over par = better grade
     let grade = 'D';
-    if      (overPar <= -3) grade = 'S';
-    else if (overPar <=  0) grade = 'A';
-    else if (overPar <=  4) grade = 'B';
-    else if (overPar <=  8) grade = 'C';
+    if      (overPar >=  5) grade = 'S';
+    else if (overPar >=  2) grade = 'A';
+    else if (overPar >=  0) grade = 'B';
+    else if (overPar >= -3) grade = 'C';
+    // else D: 4+ under par — lost badly
 
-    // Celebration if under par overall
-    if (totalStrokes < totalPar) {
+    // Celebration if AT or OVER par (the winning condition)
+    if (totalStrokes >= totalPar) {
       this.maverick.setState('celebrate');
+    } else {
+      this.maverick.setState('frustrated');
     }
 
     this.state = STATE.GAME_OVER;
