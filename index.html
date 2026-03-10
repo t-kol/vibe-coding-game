@@ -12,6 +12,7 @@
 </head>
 <body>
 <canvas id="game"></canvas>
+<audio id="bgm" src="assets/music/249152__WhiteMcSkeeRemix.mp3" loop></audio>
 <script>
 'use strict';
 
@@ -1304,6 +1305,17 @@ function init() {
       switchMap();
     }
   });
+
+  // Start BGM on first user interaction (browser autoplay policy)
+  const bgm = document.getElementById('bgm');
+  bgm.volume = 0.5;
+  const startBGM = () => {
+    bgm.play().catch(() => {});
+    window.removeEventListener('keydown', startBGM);
+    window.removeEventListener('pointerdown', startBGM);
+  };
+  window.addEventListener('keydown', startBGM);
+  window.addEventListener('pointerdown', startBGM);
 
   // load tileset then start game loop
   loadTileset(() => {
