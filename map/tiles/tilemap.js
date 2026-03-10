@@ -1,18 +1,23 @@
 // map/tiles/tilemap.js
 // Tile ID → spritesheet {sx, sy} offset
-// Each tile is 64×64px; spritesheet is 1024×256px (16 tiles wide × 4 rows)
+// Sheet: assets/tiles/map_tiles.png — 4 columns × 4 rows, each tile 64×64px (256×256px total)
+//
+//   col →  0         1             2           3
+//   row 0: VOID      ASPHALT       SIDEWALK    GRASS
+//   row 1: TREE      INTERSECTION  DIRT        PARKING
+//   row 2: BUILDING  CURB          —           —
 
 const TILEMAP = {
-  0:  { sx: 0,   sy: 0 },   // Void
-  1:  { sx: 64,  sy: 0 },   // Asphalt
-  2:  { sx: 128, sy: 0 },   // Intersection
-  3:  { sx: 192, sy: 0 },   // Sidewalk
-  4:  { sx: 256, sy: 0 },   // Grass
-  5:  { sx: 320, sy: 0 },   // Dirt Path
-  6:  { sx: 384, sy: 0 },   // Parking Lot
-  7:  { sx: 448, sy: 0 },   // Building
-  8:  { sx: 512, sy: 0 },   // Tree Cluster
-  10: { sx: 576, sy: 0 },   // Curb
+  0:  { sx: 0,   sy: 0   },  // VOID
+  1:  { sx: 64,  sy: 0   },  // ASPHALT
+  2:  { sx: 64,  sy: 64  },  // INTERSECTION
+  3:  { sx: 128, sy: 0   },  // SIDEWALK
+  4:  { sx: 192, sy: 0   },  // GRASS
+  5:  { sx: 128, sy: 64  },  // DIRT
+  6:  { sx: 192, sy: 64  },  // PARKING
+  7:  { sx: 0,   sy: 128 },  // BUILDING
+  8:  { sx: 0,   sy: 64  },  // TREE
+  10: { sx: 64,  sy: 128 },  // CURB
 };
 
 module.exports = { TILEMAP };
