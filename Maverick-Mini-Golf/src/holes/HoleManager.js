@@ -143,8 +143,9 @@ export class HoleManager {
       return null;
     }
 
-    this.current  = holeData;
+    this.current   = holeData;
     this._modeData = holeData[mode] || holeData.normal;
+    this._mode     = mode;
     this.tilemap   = this._parseMap(this._modeData.map);
     this._tee      = { ...this._modeData.tee };
     this._cup      = { ...this._modeData.cup };
