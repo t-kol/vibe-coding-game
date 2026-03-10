@@ -836,6 +836,7 @@ function update(dt) {
       if (state.menuSel===3) { state.screen='howtoplay'; }
       else { initState(state.menuSel,'climbing'); state.screen='climbing'; }
     }
+    if (jp.has('Escape')) history.back();
 
   } else if (state.screen==='howtoplay') {
     if (jp.has('Escape')||jp.has('Enter')||jp.has(' ')) state.screen='menu';
