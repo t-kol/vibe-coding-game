@@ -1524,12 +1524,11 @@ function drawHUD() {
   }
 
   // ── Score + Speed panel (top-right) ────────────────────────────
-  const PANEL_W = 192, PANEL_H = STATE.combo > 1 ? 114 : 94;
-  const PX = canvas.width - PANEL_W - 12;
+  const PX = canvas.width - 204;
   const PY = 12;
 
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(PX, PY, PANEL_W, PANEL_H);
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur  = 6;
 
   ctx.fillStyle = '#888888';
   ctx.font = 'bold 11px monospace';
@@ -1552,6 +1551,8 @@ function drawHUD() {
   ctx.fillStyle = '#CCCCCC';
   ctx.font = 'bold 18px monospace';
   ctx.fillText(`${speedKmh} km/h`, PX + 12, speedY + 22);
+
+  ctx.shadowBlur = 0;
 
   // ── DRIFT flash (center, only when drifting forward) ───────────
   const fwd = car.vx * Math.cos(car.heading) + car.vy * Math.sin(car.heading);
