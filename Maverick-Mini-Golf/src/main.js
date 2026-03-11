@@ -810,18 +810,21 @@ class Game {
     const hd = this.holeManager.current;
     if (!hd) return;
 
-    // Running totals across all holes played so far
+    // Running totals across all holes played so far.
+    // Only include the current hole's par once the player has taken at least
+    // one stroke — otherwise the score jumps by -par at the start of each hole.
     const totalStrokes = this.scores.reduce((a, b) => a + b, 0) + this.strokes;
     const runningPar   = this.holeManager.holes
       .slice(0, this.currentHole - 1)
       .reduce((acc, h) => acc + h.par, 0);
+    const totalPar     = runningPar + (this.strokes > 0 ? hd.par : 0);
 
     this.hud.draw(ctx, {
       holeNumber:    this.currentHole,
       par:           hd.par,
       strokes:       this.strokes,
       totalStrokes,
-      totalPar:      runningPar + hd.par,
+      totalPar,
       mode:          this.mode,
       activePowerups: this.activePowerups,
     }, this.wind);

@@ -124,6 +124,7 @@ export class HUD {
     const overPar    = (state.totalStrokes || 0) - (state.totalPar || 0);
     const scoreColor = overPar < 0 ? '#7EC882' : overPar > 0 ? '#FF6666' : COLORS.HUD_TEXT;
     const scoreStr   = overPar === 0 ? 'E' : overPar > 0 ? `+${overPar}` : `${overPar}`;
+
     ctx.fillStyle    = scoreColor;
     ctx.font         = 'bold 8px monospace';
     ctx.textAlign    = 'right';
@@ -210,8 +211,8 @@ export class HUD {
   }
 
   _drawStrokeInfo(ctx, state) {
-    // Bottom-right panel
-    const panelW = 52;
+    // Bottom-right panel — wide enough for "STROKE 7" at bold 8px + label below
+    const panelW = 72;
     const panelH = 22;
     const px     = CANVAS.WIDTH - panelW - 2;
     const py     = CANVAS.HEIGHT - panelH - 2;
