@@ -13,6 +13,9 @@
 <body>
 <canvas id="game"></canvas>
 <audio id="bgm" src="assets/music/249152__WhiteMcSkeeRemix.mp3" loop></audio>
+<video id="sinkhole-video" src="assets/sinkhole-cutscene.mp4"
+  style="display:none;position:fixed;inset:0;width:100%;height:100%;object-fit:contain;z-index:999;background:#000;"
+  preload="auto"></video>
 <script>
 'use strict';
 
@@ -194,15 +197,25 @@ function updateSinkhole() {
     if (SINKHOLE.timer >= SINKHOLE.WARN_FRAMES) {
       SINKHOLE.phase = 'falling';
       SINKHOLE.timer = 0;
+      // Pause BGM and play the cutscene video fullscreen
+      const bgm = document.getElementById('bgm');
+      bgm.pause();
+      const vid = document.getElementById('sinkhole-video');
+      vid.style.display = 'block';
+      vid.currentTime = 0;
+      vid.play().catch(() => {});
+      vid.onended = () => {
+        vid.style.display = 'none';
+        bgm.play().catch(() => {});
+        SINKHOLE.phase = 'respawn';
+        SINKHOLE.timer = 0;
+      };
     }
     return;
   }
 
   if (SINKHOLE.phase === 'falling') {
-    if (SINKHOLE.timer >= SINKHOLE.FALL_FRAMES) {
-      SINKHOLE.phase = 'respawn';
-      SINKHOLE.timer = 0;
-    }
+    // Video playback drives this phase — transition handled by the 'ended' listener
     return;
   }
 
